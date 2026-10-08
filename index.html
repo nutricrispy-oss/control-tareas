@@ -11,6 +11,11 @@
     
     <!-- PWA Manifest Link con ruta relativa para subdirectorios de GitHub Pages -->
     <link rel="manifest" href="./manifest.json">
+    <link rel="icon" type="image/png" sizes="48x48" href="./icons/favicon-48.png">
+    <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="TaskFlow">
 
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -42,6 +47,9 @@
     <!-- jsPDF & html2canvas for PDF Generation -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <!-- jsPDF AutoTable (tablas PDF prolijas) y ExcelJS (Excel .xlsx con formato) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
 
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
@@ -61,14 +69,29 @@
             background: rgba(156, 163, 175, 0.5);
             border-radius: 3px;
         }
-        /* Print rules */
+        /* Print rules: hoja A4 vertical, tabla ordenada y legible */
+        @page { size: A4 portrait; margin: 12mm; }
         @media print {
             .no-print { display: none !important; }
             .print-only { display: block !important; }
-            body { background: #ffffff !important; color: #000000 !important; padding: 0 !important; }
+            html, body { background: #ffffff !important; color: #000000 !important; padding: 0 !important; }
+            body { font-size: 10px !important; }
             .shadow-lg, .shadow-md, .shadow-sm { box-shadow: none !important; }
-            .border { border-color: #e5e7eb !important; }
+            .border { border-color: #cbd5e1 !important; }
+            .max-w-7xl { max-width: 100% !important; padding: 0 !important; }
+            .overflow-x-auto, .overflow-hidden { overflow: visible !important; }
+            table { width: 100% !important; table-layout: fixed; border-collapse: collapse !important; page-break-inside: auto; }
+            thead { display: table-header-group; }
+            tr { page-break-inside: avoid; }
+            th, td { border: 1px solid #cbd5e1 !important; padding: 4px 5px !important; font-size: 9px !important; vertical-align: middle; word-wrap: break-word; }
+            th { background: #1e40af !important; color: #ffffff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            tbody tr:nth-child(even) td { background: #f1f5f9 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            td select { appearance: none; -webkit-appearance: none; border: 0 !important; background: transparent !important; color: #000 !important; padding: 0 !important; text-align: center; width: 100%; }
+            span[class*="bg-"] { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
         }
+        /* Campo de fecha con teclado + calendario */
+        .date-field { position: relative; }
+        .date-field .date-native { position: absolute; right: 0; bottom: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
     </style>
 </head>
 <body class="bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-100 min-h-screen flex flex-col transition-colors duration-200">
@@ -231,7 +254,7 @@
                         </div>
                         
                         <div class="flex items-center gap-2">
-                            <button onclick="exportToCSV()" title="Exportar a Excel/CSV" class="px-3 py-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition">
+                            <button onclick="exportToExcel()" title="Exportar a Excel (.xlsx)" class="px-3 py-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition">
                                 <i class="fa-solid fa-file-excel text-emerald-600"></i> Excel
                             </button>
                             <button onclick="openNewTaskModal()" class="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-sm transition">
@@ -442,11 +465,19 @@
                 <div class="grid grid-cols-2 gap-3">
                     <div>
                         <label class="block font-medium text-slate-700 dark:text-slate-300 mb-1">Fecha de Inicio *</label>
-                        <input type="date" id="taskStartDate" required onchange="calculateDurationInModal()" class="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl outline-none">
+                        <div class="date-field">
+                            <input type="text" id="taskStartDate" required inputmode="numeric" autocomplete="off" maxlength="10" placeholder="dd/mm/aaaa" oninput="maskDateInput(this); calculateDurationInModal()" class="w-full pl-3.5 pr-10 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-blue-500">
+                            <button type="button" tabindex="-1" onclick="openDatePicker('taskStartDate')" title="Abrir calendario" class="absolute right-1.5 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center text-slate-400 hover:text-blue-600 rounded-lg"><i class="fa-regular fa-calendar"></i></button>
+                            <input type="date" id="taskStartDateNative" tabindex="-1" aria-hidden="true" class="date-native" onchange="pickNativeDate('taskStartDate', this.value)">
+                        </div>
                     </div>
                     <div>
                         <label class="block font-medium text-slate-700 dark:text-slate-300 mb-1">Fecha Final *</label>
-                        <input type="date" id="taskEndDate" required onchange="calculateDurationInModal()" class="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl outline-none">
+                        <div class="date-field">
+                            <input type="text" id="taskEndDate" required inputmode="numeric" autocomplete="off" maxlength="10" placeholder="dd/mm/aaaa" oninput="maskDateInput(this); calculateDurationInModal()" class="w-full pl-3.5 pr-10 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-blue-500">
+                            <button type="button" tabindex="-1" onclick="openDatePicker('taskEndDate')" title="Abrir calendario" class="absolute right-1.5 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center text-slate-400 hover:text-blue-600 rounded-lg"><i class="fa-regular fa-calendar"></i></button>
+                            <input type="date" id="taskEndDateNative" tabindex="-1" aria-hidden="true" class="date-native" onchange="pickNativeDate('taskEndDate', this.value)">
+                        </div>
                     </div>
                 </div>
 
@@ -770,8 +801,8 @@
                         </td>
                         <td class="p-3 text-center">${priorityBadge}</td>
                         <td class="p-3 text-center text-xs text-slate-500 dark:text-slate-400">
-                            <div>${t.startDate || '-'}</div>
-                            <div class="text-[10px] text-slate-400">hasta ${t.endDate || '-'}</div>
+                            <div>${fmtDate(t.startDate)}</div>
+                            <div class="text-[10px] text-slate-400">hasta ${fmtDate(t.endDate)}</div>
                         </td>
                         <td class="p-3 text-center font-medium">${duration} días</td>
                         <td class="p-3 text-center">
@@ -802,9 +833,9 @@
             document.getElementById('modalTitle').innerText = 'Nueva Tarea';
             document.getElementById('taskForm').reset();
             
-            const todayStr = new Date().toISOString().split('T')[0];
-            document.getElementById('taskStartDate').value = todayStr;
-            document.getElementById('taskEndDate').value = todayStr;
+            const todayStr = todayISO();
+            setDateValue('taskStartDate', todayStr);
+            setDateValue('taskEndDate', todayStr);
             calculateDurationInModal();
 
             document.getElementById('taskModal').classList.remove('hidden');
@@ -819,8 +850,8 @@
             document.getElementById('taskTitle').value = task.title;
             document.getElementById('taskPriority').value = task.priority;
             document.getElementById('taskCategory').value = task.category || '';
-            document.getElementById('taskStartDate').value = task.startDate;
-            document.getElementById('taskEndDate').value = task.endDate;
+            setDateValue('taskStartDate', task.startDate);
+            setDateValue('taskEndDate', task.endDate);
             document.getElementById('taskStatus').value = task.status;
 
             calculateDurationInModal();
@@ -832,8 +863,8 @@
         }
 
         function calculateDurationInModal() {
-            const start = document.getElementById('taskStartDate').value;
-            const end = document.getElementById('taskEndDate').value;
+            const start = getDateValue('taskStartDate');
+            const end = getDateValue('taskEndDate');
             const duration = calculateDurationDays(start, end);
             document.getElementById('taskDurationDisplay').value = duration + ' día(s)';
         }
@@ -844,9 +875,18 @@
             const title = document.getElementById('taskTitle').value.trim();
             const priority = document.getElementById('taskPriority').value;
             const category = document.getElementById('taskCategory').value.trim() || 'General';
-            const startDate = document.getElementById('taskStartDate').value;
-            const endDate = document.getElementById('taskEndDate').value;
+            const startDate = getDateValue('taskStartDate');
+            const endDate = getDateValue('taskEndDate');
             const status = document.getElementById('taskStatus').value;
+
+            if (!startDate || !endDate) {
+                alert('Ingresa fechas válidas con formato dd/mm/aaaa.');
+                return;
+            }
+            if (endDate < startDate) {
+                alert('La fecha final no puede ser anterior a la fecha de inicio.');
+                return;
+            }
 
             if (id) {
                 const index = tasks.findIndex(t => t.id == id);
@@ -968,51 +1008,485 @@
             }
         }
 
-        function exportToCSV() {
-            let csv = 'ID,Tarea,Prioridad,Categoria,Fecha Inicio,Fecha Final,Duracion (dias),Estado,Demorado\n';
-            tasks.forEach(t => {
-                const duration = calculateDurationDays(t.startDate, t.endDate);
-                const delay = getDelayStatusText(t);
-                csv += `"${t.id}","${t.title.replace(/"/g, '""')}","${t.priority}","${t.category || ''}","${t.startDate}","${t.endDate}","${duration}","${t.status}","${delay}"\n`;
-            });
+        // ===================== Utilidades de fecha (teclado + calendario) =====================
+        function todayISO() {
+            const d = new Date();
+            const m = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            return `${d.getFullYear()}-${m}-${day}`;
+        }
 
-            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-            const link = document.createElement("a");
+        // yyyy-mm-dd -> dd/mm/aaaa
+        function fmtDate(iso) {
+            if (!iso) return '-';
+            const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+            return m ? `${m[3]}/${m[2]}/${m[1]}` : iso;
+        }
+
+        // dd/mm/aaaa -> yyyy-mm-dd (o '' si no es válida)
+        function displayToIso(txt) {
+            const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec((txt || '').trim());
+            if (!m) return '';
+            const d = +m[1], mo = +m[2], y = +m[3];
+            const dt = new Date(y, mo - 1, d);
+            if (dt.getFullYear() !== y || dt.getMonth() !== mo - 1 || dt.getDate() !== d) return '';
+            return `${m[3]}-${m[2]}-${m[1]}`;
+        }
+
+        function maskDateInput(el) {
+            const digits = el.value.replace(/\D/g, '').slice(0, 8);
+            let out = digits;
+            if (digits.length > 4) out = digits.slice(0, 2) + '/' + digits.slice(2, 4) + '/' + digits.slice(4);
+            else if (digits.length > 2) out = digits.slice(0, 2) + '/' + digits.slice(2);
+            el.value = out;
+        }
+
+        function getDateValue(id) { return displayToIso(document.getElementById(id).value); }
+        function setDateValue(id, iso) { document.getElementById(id).value = iso ? fmtDate(iso) : ''; }
+
+        function openDatePicker(id) {
+            const native = document.getElementById(id + 'Native');
+            native.value = getDateValue(id) || '';
+            try {
+                if (native.showPicker) native.showPicker(); else { native.focus(); native.click(); }
+            } catch (e) { native.focus(); native.click(); }
+        }
+
+        function pickNativeDate(id, iso) {
+            if (!iso) return;
+            setDateValue(id, iso);
+            calculateDurationInModal();
+        }
+
+        // ===================== Datos para reportes =====================
+        function getTaskStats() {
+            const total = tasks.length;
+            const completed = tasks.filter(t => t.status === 'Completado').length;
+            const inProgress = tasks.filter(t => t.status === 'En curso').length;
+            const notStarted = tasks.filter(t => t.status === 'No empezado').length;
+            const delayed = tasks.filter(t => isTaskDelayed(t)).length;
+            const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
+            const avgDuration = total > 0
+                ? Math.round(tasks.reduce((a, t) => a + calculateDurationDays(t.startDate, t.endDate), 0) / total * 10) / 10
+                : 0;
+
+            const group = (keyFn, order) => {
+                const map = new Map();
+                tasks.forEach(t => {
+                    const k = keyFn(t);
+                    if (!map.has(k)) map.set(k, { name: k, total: 0, completed: 0, inProgress: 0, notStarted: 0, delayed: 0 });
+                    const g = map.get(k);
+                    g.total++;
+                    if (t.status === 'Completado') g.completed++;
+                    else if (t.status === 'En curso') g.inProgress++;
+                    else g.notStarted++;
+                    if (isTaskDelayed(t)) g.delayed++;
+                });
+                let arr = [...map.values()];
+                arr = order
+                    ? order.map(n => arr.find(g => g.name === n)).filter(Boolean)
+                    : arr.sort((a, b) => a.name.localeCompare(b.name, 'es'));
+                return arr;
+            };
+
+            return {
+                total, completed, inProgress, notStarted, delayed, percent, avgDuration,
+                byPriority: group(t => t.priority, ['Alta', 'Media', 'Baja']),
+                byCategory: group(t => t.category || 'General')
+            };
+        }
+
+        function downloadBlob(blob, filename) {
+            const link = document.createElement('a');
             link.href = URL.createObjectURL(blob);
-            link.setAttribute("download", `Control_de_tareas_${new Date().toISOString().slice(0,10)}.csv`);
+            link.setAttribute('download', filename);
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
+            setTimeout(() => URL.revokeObjectURL(link.href), 4000);
         }
 
-        async function generatePDFReport() {
-            if (window.jspdf) {
-                const { jsPDF } = window.jspdf;
-                const doc = new jsPDF();
+        // ===================== Exportar a Excel (.xlsx con formato A4) =====================
+        async function exportToExcel() {
+            if (!window.ExcelJS) { exportToCSV(); return; }
 
-                doc.setFontSize(18);
-                doc.text("Reporte de Control de Tareas - TaskFlow Pro", 14, 20);
-                doc.setFontSize(10);
-                doc.text(`Fecha: ${new Date().toLocaleDateString('es-ES')}`, 14, 28);
-                doc.text(`Total Tareas: ${tasks.length} | Completadas: ${tasks.filter(t=>t.status==='Completado').length}`, 14, 34);
+            const st = getTaskStats();
+            const wb = new ExcelJS.Workbook();
+            wb.creator = 'TaskFlow Pro';
+            wb.created = new Date();
 
-                let y = 45;
-                doc.setFontSize(9);
-                tasks.forEach((t, i) => {
-                    if (y > 270) {
-                        doc.addPage();
-                        y = 20;
-                    }
-                    const delayed = isTaskDelayed(t) ? " (DEMORADO)" : "";
-                    doc.text(`${i+1}. [${t.priority}] ${t.title} - ${t.status}${delayed}`, 14, y);
-                    doc.text(`   Inicio: ${t.startDate} | Fin: ${t.endDate} | Cat: ${t.category || 'General'}`, 14, y + 5);
-                    y += 12;
+            const thin = { style: 'thin', color: { argb: 'FFCBD5E1' } };
+            const border = { top: thin, left: thin, bottom: thin, right: thin };
+            const BLUE = 'FF1E40AF';
+            const PRIORITY = { 'Alta': ['FFFEE2E2', 'FFB91C1C'], 'Media': ['FFFEF3C7', 'FFB45309'], 'Baja': ['FFDBEAFE', 'FF1D4ED8'] };
+            const STATUS = { 'Completado': ['FFD1FAE5', 'FF047857'], 'En curso': ['FFFEF3C7', 'FFB45309'], 'No empezado': ['FFE2E8F0', 'FF475569'] };
+            const DELAY = { 'Demorado': ['FFFFE4E6', 'FFBE123C'], 'En Plazo': ['FFD1FAE5', 'FF047857'] };
+
+            const paint = (cell, [bg, fg]) => {
+                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bg } };
+                cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: fg } };
+            };
+            const banner = (ws, row, lastCol, text, size, height, fill, color, bold = true) => {
+                ws.mergeCells(`A${row}:${lastCol}${row}`);
+                const c = ws.getCell(`A${row}`);
+                c.value = text;
+                c.font = { name: 'Calibri', size, bold, color: { argb: color } };
+                c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fill } };
+                c.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+                ws.getRow(row).height = height;
+            };
+            const headerRow = (ws, rowNum, headers) => {
+                const r = ws.getRow(rowNum);
+                headers.forEach((h, i) => {
+                    const c = r.getCell(i + 1);
+                    c.value = h;
+                    c.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+                    c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: BLUE } };
+                    c.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+                    c.border = border;
                 });
+                r.height = 24;
+            };
 
-                doc.save(`Reporte_Tareas_${new Date().toISOString().slice(0,10)}.pdf`);
-            } else {
-                window.print();
+            // ---------- Hoja 1: Tareas (A4 horizontal) ----------
+            const ws = wb.addWorksheet('Tareas', {
+                views: [{ state: 'frozen', ySplit: 4, showGridLines: false }],
+                pageSetup: {
+                    paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0,
+                    horizontalCentered: true,
+                    margins: { left: 0.4, right: 0.4, top: 0.6, bottom: 0.6, header: 0.3, footer: 0.3 }
+                }
+            });
+            ws.pageSetup.printTitlesRow = '4:4';
+            ws.headerFooter.oddFooter = '&L&8TaskFlow Pro&C&8Página &P de &N&R&8&D';
+
+            const widths = [7, 38, 11, 18, 13, 13, 11, 15, 13];
+            ws.columns = widths.map(w => ({ width: w }));
+            const LAST = 'I';
+
+            banner(ws, 1, LAST, 'Reporte de Control de Tareas - TaskFlow Pro', 16, 32, BLUE, 'FFFFFFFF');
+            banner(ws, 2, LAST,
+                `Generado el ${fmtDate(todayISO())}    |    Total: ${st.total}    |    Completadas: ${st.completed}    |    En curso: ${st.inProgress}    |    No empezadas: ${st.notStarted}    |    Demoradas: ${st.delayed}    |    Avance: ${st.percent}%`,
+                10, 22, 'FFEFF6FF', 'FF1E3A8A', false);
+            ws.getRow(3).height = 6;
+            headerRow(ws, 4, ['ID', 'Tarea', 'Prioridad', 'Categoría', 'Fecha inicio', 'Fecha final', 'Duración (días)', 'Estado', '¿Demorado?']);
+
+            tasks.forEach((t, idx) => {
+                const rowNum = 5 + idx;
+                const row = ws.getRow(rowNum);
+                const duration = calculateDurationDays(t.startDate, t.endDate);
+                const delay = getDelayStatusText(t);
+                const toDate = iso => iso ? new Date(iso + 'T00:00:00Z') : null;
+
+                [t.id, t.title, t.priority, t.category || 'General', toDate(t.startDate), toDate(t.endDate), duration, t.status, delay].forEach((v, i) => { row.getCell(i + 1).value = v; });
+
+                const zebra = idx % 2 === 1 ? 'FFF8FAFC' : 'FFFFFFFF';
+                for (let c = 1; c <= 9; c++) {
+                    const cell = row.getCell(c);
+                    cell.border = border;
+                    cell.font = { name: 'Calibri', size: 10, color: { argb: 'FF1E293B' } };
+                    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: zebra } };
+                    cell.alignment = { vertical: 'middle', horizontal: c === 2 ? 'left' : 'center', wrapText: true, indent: c === 2 ? 1 : 0 };
+                }
+                row.getCell(5).numFmt = 'dd/mm/yyyy';
+                row.getCell(6).numFmt = 'dd/mm/yyyy';
+                row.getCell(7).numFmt = '0';
+                row.getCell(1).font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF64748B' } };
+                if (PRIORITY[t.priority]) paint(row.getCell(3), PRIORITY[t.priority]);
+                if (STATUS[t.status]) paint(row.getCell(8), STATUS[t.status]);
+                if (DELAY[delay]) paint(row.getCell(9), DELAY[delay]);
+
+                const lines = Math.max(1, Math.ceil((t.title || '').length / 36));
+                row.height = Math.max(22, lines * 14 + 8);
+            });
+
+            const lastRow = 4 + Math.max(tasks.length, 1);
+            ws.autoFilter = `A4:${LAST}${lastRow}`;
+            ws.getRow(lastRow + 1).height = 8;
+            banner(ws, lastRow + 2, LAST, `Total de tareas: ${st.total}`, 10, 20, 'FFF1F5F9', 'FF334155', true);
+            ws.pageSetup.printArea = `A1:${LAST}${lastRow + 2}`;
+
+            // ---------- Hoja 2: Resumen (A4 vertical) ----------
+            const rs = wb.addWorksheet('Resumen', {
+                views: [{ showGridLines: false }],
+                pageSetup: {
+                    paperSize: 9, orientation: 'portrait', fitToPage: true, fitToWidth: 1, fitToHeight: 0,
+                    horizontalCentered: true,
+                    margins: { left: 0.5, right: 0.5, top: 0.7, bottom: 0.7, header: 0.3, footer: 0.3 }
+                }
+            });
+            rs.headerFooter.oddFooter = '&L&8TaskFlow Pro&C&8Página &P de &N&R&8&D';
+            rs.columns = [{ width: 26 }, { width: 13 }, { width: 14 }, { width: 13 }, { width: 15 }, { width: 13 }];
+
+            banner(rs, 1, 'F', 'Resumen de Tareas', 16, 32, BLUE, 'FFFFFFFF');
+            banner(rs, 2, 'F', `Generado el ${fmtDate(todayISO())}`, 10, 20, 'FFEFF6FF', 'FF1E3A8A', false);
+            rs.getRow(3).height = 8;
+
+            const sectionTitle = (row, text) => {
+                rs.mergeCells(`A${row}:F${row}`);
+                const c = rs.getCell(`A${row}`);
+                c.value = text;
+                c.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FF1E293B' } };
+                c.alignment = { vertical: 'middle' };
+                c.border = { bottom: { style: 'medium', color: { argb: BLUE } } };
+                rs.getRow(row).height = 22;
+            };
+
+            // Indicadores generales
+            sectionTitle(4, 'Indicadores generales');
+            headerRow(rs, 5, ['Indicador', 'Valor']);
+            const kpis = [
+                ['Total de tareas', st.total, '0'],
+                ['Completadas', st.completed, '0'],
+                ['En curso', st.inProgress, '0'],
+                ['No empezadas', st.notStarted, '0'],
+                ['Demoradas', st.delayed, '0'],
+                ['Avance general', st.total ? st.completed / st.total : 0, '0%'],
+                ['Duración promedio (días)', st.avgDuration, '0.0']
+            ];
+            kpis.forEach((k, i) => {
+                const r = rs.getRow(6 + i);
+                r.getCell(1).value = k[0];
+                r.getCell(2).value = k[1];
+                r.getCell(2).numFmt = k[2];
+                [1, 2].forEach(c => {
+                    const cell = r.getCell(c);
+                    cell.border = border;
+                    cell.font = { name: 'Calibri', size: 10, bold: c === 2, color: { argb: 'FF1E293B' } };
+                    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: i % 2 ? 'FFF8FAFC' : 'FFFFFFFF' } };
+                    cell.alignment = { vertical: 'middle', horizontal: c === 1 ? 'left' : 'center', indent: c === 1 ? 1 : 0 };
+                });
+                r.height = 20;
+            });
+
+            const groupTable = (startRow, title, firstHeader, groups) => {
+                sectionTitle(startRow, title);
+                headerRow(rs, startRow + 1, [firstHeader, 'Total', 'Completadas', 'En curso', 'No empezadas', 'Demoradas']);
+                groups.forEach((g, i) => {
+                    const r = rs.getRow(startRow + 2 + i);
+                    [g.name, g.total, g.completed, g.inProgress, g.notStarted, g.delayed].forEach((v, i) => { r.getCell(i + 1).value = v; });
+                    for (let c = 1; c <= 6; c++) {
+                        const cell = r.getCell(c);
+                        cell.border = border;
+                        cell.font = { name: 'Calibri', size: 10, bold: c === 2, color: { argb: 'FF1E293B' } };
+                        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: i % 2 ? 'FFF8FAFC' : 'FFFFFFFF' } };
+                        cell.alignment = { vertical: 'middle', horizontal: c === 1 ? 'left' : 'center', indent: c === 1 ? 1 : 0 };
+                    }
+                    if (g.delayed > 0) paint(r.getCell(6), DELAY['Demorado']);
+                    r.height = 20;
+                });
+                return startRow + 2 + Math.max(groups.length, 1);
+            };
+
+            let next = 6 + kpis.length + 1;
+            next = groupTable(next, 'Por prioridad', 'Prioridad', st.byPriority) + 1;
+            next = groupTable(next, 'Por categoría', 'Categoría', st.byCategory);
+            rs.pageSetup.printArea = `A1:F${next}`;
+
+            try {
+                const buffer = await wb.xlsx.writeBuffer();
+                downloadBlob(new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
+                    `Control_de_tareas_${todayISO()}.xlsx`);
+            } catch (err) {
+                console.error(err);
+                alert('No se pudo generar el Excel. Se descargará un CSV como alternativa.');
+                exportToCSV();
             }
+        }
+
+        // Alternativa si la librería de Excel no está disponible (sin conexión la primera vez)
+        function exportToCSV() {
+            const q = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+            const rows = [['ID', 'Tarea', 'Prioridad', 'Categoría', 'Fecha inicio', 'Fecha final', 'Duración (días)', 'Estado', '¿Demorado?']];
+            tasks.forEach(t => rows.push([
+                t.id, t.title, t.priority, t.category || 'General', fmtDate(t.startDate), fmtDate(t.endDate),
+                calculateDurationDays(t.startDate, t.endDate), t.status, getDelayStatusText(t)
+            ]));
+            const csv = '\ufeff' + rows.map(r => r.map(q).join(';')).join('\r\n');
+            downloadBlob(new Blob([csv], { type: 'text/csv;charset=utf-8;' }), `Control_de_tareas_${todayISO()}.csv`);
+        }
+
+        // ===================== Reporte PDF (A4 vertical) =====================
+        async function generatePDFReport() {
+            if (!window.jspdf) { window.print(); return; }
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+            if (typeof doc.autoTable !== 'function') { window.print(); return; }
+
+            const st = getTaskStats();
+            const W = 210, M = 12, CW = W - 2 * M;
+            const BLUE = [30, 64, 175];
+            const BORDER = [203, 213, 225];
+            const INK = [30, 41, 59];
+
+            const PRIORITY = { 'Alta': [[254, 226, 226], [185, 28, 28]], 'Media': [[254, 243, 199], [180, 83, 9]], 'Baja': [[219, 234, 254], [29, 78, 216]] };
+            const STATUS = { 'Completado': [[209, 250, 229], [4, 120, 87]], 'En curso': [[254, 243, 199], [180, 83, 9]], 'No empezado': [[226, 232, 240], [71, 85, 105]] };
+            const DELAY = { 'Demorado': [[255, 228, 230], [190, 18, 60]], 'En Plazo': [[209, 250, 229], [4, 120, 87]] };
+
+            // Encabezado
+            doc.setFillColor(...BLUE);
+            doc.rect(0, 0, W, 24, 'F');
+            doc.setTextColor(255, 255, 255);
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(16);
+            doc.text('Reporte de Control de Tareas', M, 11);
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(9);
+            doc.text('TaskFlow Pro', M, 18);
+            doc.text('Generado el ' + fmtDate(todayISO()), W - M, 18, { align: 'right' });
+
+            // Indicadores
+            const kpis = [
+                ['TOTAL', st.total, [30, 64, 175]],
+                ['COMPLETADAS', st.completed, [4, 120, 87]],
+                ['EN CURSO', st.inProgress, [180, 83, 9]],
+                ['DEMORADAS', st.delayed, [190, 18, 60]]
+            ];
+            const gap = 4, bw = (CW - gap * 3) / 4, by = 30, bh = 17;
+            kpis.forEach((k, i) => {
+                const x = M + i * (bw + gap);
+                doc.setFillColor(248, 250, 252);
+                doc.setDrawColor(...BORDER);
+                doc.setLineWidth(0.25);
+                doc.roundedRect(x, by, bw, bh, 2, 2, 'FD');
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(7);
+                doc.setTextColor(100, 116, 139);
+                doc.text(k[0], x + bw / 2, by + 5.5, { align: 'center' });
+                doc.setFontSize(15);
+                doc.setTextColor(...k[2]);
+                doc.text(String(k[1]), x + bw / 2, by + 13.5, { align: 'center' });
+            });
+
+            // Barra de avance
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(8);
+            doc.setTextColor(...INK);
+            doc.text('Avance general', M, 54);
+            doc.setFont('helvetica', 'bold');
+            doc.text(st.percent + '%', W - M, 54, { align: 'right' });
+            doc.setFillColor(226, 232, 240);
+            doc.roundedRect(M, 56, CW, 3, 1.5, 1.5, 'F');
+            if (st.percent > 0) {
+                doc.setFillColor(16, 185, 129);
+                doc.roundedRect(M, 56, Math.max(3, CW * st.percent / 100), 3, 1.5, 1.5, 'F');
+            }
+
+            // Tabla principal
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(10);
+            doc.setTextColor(...INK);
+            doc.text('Detalle de tareas', M, 66);
+
+            const body = tasks.map(t => [
+                t.id,
+                t.title,
+                t.category || 'General',
+                t.priority,
+                fmtDate(t.startDate),
+                fmtDate(t.endDate),
+                calculateDurationDays(t.startDate, t.endDate),
+                t.status,
+                getDelayStatusText(t)
+            ]);
+
+            const tableBase = {
+                theme: 'grid',
+                margin: { left: M, right: M, top: 16, bottom: 18 },
+                styles: { font: 'helvetica', fontSize: 8, cellPadding: 1.8, lineColor: BORDER, lineWidth: 0.2, textColor: INK, valign: 'middle', overflow: 'linebreak' },
+                headStyles: { fillColor: BLUE, textColor: 255, fontStyle: 'bold', halign: 'center', valign: 'middle' },
+                alternateRowStyles: { fillColor: [248, 250, 252] },
+                rowPageBreak: 'avoid'
+            };
+
+            const runningHeader = (data) => {
+                if (data.pageNumber > 1) {
+                    doc.setFont('helvetica', 'normal');
+                    doc.setFontSize(8);
+                    doc.setTextColor(100, 116, 139);
+                    doc.text('TaskFlow Pro - Reporte de Control de Tareas', M, 9);
+                    doc.setDrawColor(...BORDER);
+                    doc.setLineWidth(0.3);
+                    doc.line(M, 11.5, W - M, 11.5);
+                }
+            };
+
+            doc.autoTable({
+                ...tableBase,
+                startY: 68,
+                head: [['#', 'Tarea', 'Categoría', 'Prioridad', 'Inicio', 'Fin', 'Días', 'Estado', 'Plazo']],
+                body,
+                columnStyles: {
+                    0: { cellWidth: 8, halign: 'center', textColor: [100, 116, 139], fontStyle: 'bold' },
+                    1: { cellWidth: 46, halign: 'left' },
+                    2: { cellWidth: 21, halign: 'center' },
+                    3: { cellWidth: 18, halign: 'center' },
+                    4: { cellWidth: 19, halign: 'center' },
+                    5: { cellWidth: 19, halign: 'center' },
+                    6: { cellWidth: 10, halign: 'center' },
+                    7: { cellWidth: 22, halign: 'center' },
+                    8: { cellWidth: 22, halign: 'center' }
+                },
+                didParseCell: (data) => {
+                    if (data.section !== 'body') return;
+                    const map = data.column.index === 3 ? PRIORITY : data.column.index === 7 ? STATUS : data.column.index === 8 ? DELAY : null;
+                    if (!map) return;
+                    const colors = map[data.cell.raw];
+                    if (colors) {
+                        data.cell.styles.fillColor = colors[0];
+                        data.cell.styles.textColor = colors[1];
+                        data.cell.styles.fontStyle = 'bold';
+                    }
+                },
+                didDrawPage: runningHeader
+            });
+
+            // Resumen por categoría
+            let y = doc.lastAutoTable.finalY + 9;
+            if (y > 240) { doc.addPage(); y = 20; }
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(10);
+            doc.setTextColor(...INK);
+            doc.text('Resumen por categoría', M, y);
+
+            doc.autoTable({
+                ...tableBase,
+                startY: y + 2,
+                head: [['Categoría', 'Total', 'Completadas', 'En curso', 'No empezadas', 'Demoradas']],
+                body: st.byCategory.map(g => [g.name, g.total, g.completed, g.inProgress, g.notStarted, g.delayed]),
+                columnStyles: {
+                    0: { cellWidth: 59, halign: 'left' },
+                    1: { cellWidth: 25, halign: 'center' },
+                    2: { cellWidth: 25, halign: 'center' },
+                    3: { cellWidth: 25, halign: 'center' },
+                    4: { cellWidth: 27, halign: 'center' },
+                    5: { cellWidth: 24, halign: 'center' }
+                },
+                didParseCell: (data) => {
+                    if (data.section === 'body' && data.column.index === 5 && Number(data.cell.raw) > 0) {
+                        data.cell.styles.fillColor = DELAY['Demorado'][0];
+                        data.cell.styles.textColor = DELAY['Demorado'][1];
+                        data.cell.styles.fontStyle = 'bold';
+                    }
+                },
+                didDrawPage: runningHeader
+            });
+
+            // Pie de página con numeración
+            const pages = doc.getNumberOfPages();
+            for (let i = 1; i <= pages; i++) {
+                doc.setPage(i);
+                doc.setDrawColor(...BORDER);
+                doc.setLineWidth(0.3);
+                doc.line(M, 285, W - M, 285);
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(8);
+                doc.setTextColor(100, 116, 139);
+                doc.text('TaskFlow Pro - Control de Tareas', M, 290);
+                doc.text(`Página ${i} de ${pages}`, W - M, 290, { align: 'right' });
+            }
+
+            doc.save(`Reporte_Tareas_${todayISO()}.pdf`);
         }
 
         async function shareTaskApp() {
