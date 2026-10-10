@@ -9,8 +9,18 @@
     <meta name="theme-color" content="#2563eb">
     <meta name="description" content="Sistema profesional PWA de control y gestión de tareas para GitHub Pages">
     
+    <script>
+        /* Bloqueo inmediato si hay PIN (evita ver el contenido antes de que cargue la app) */
+        try { if (JSON.parse(localStorage.getItem('taskflow_settings_v1') || '{}').pinHash) document.documentElement.classList.add('locked'); } catch (e) {}
+    </script>
+
     <!-- PWA Manifest Link con ruta relativa para subdirectorios de GitHub Pages -->
     <link rel="manifest" href="./manifest.json">
+    <link rel="icon" type="image/png" sizes="48x48" href="./icons/favicon-48.png">
+    <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="TaskFlow">
 
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -42,8 +52,14 @@
     <!-- jsPDF & html2canvas for PDF Generation -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <!-- jsPDF AutoTable (tablas PDF prolijas) y ExcelJS (Excel .xlsx con formato) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
 
     <style>
+        #appLock { display: none; }
+        html.locked #appLock { display: flex; }
+        html.locked body { overflow: hidden; }
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
         body {
             font-family: 'Inter', sans-serif;
@@ -61,17 +77,46 @@
             background: rgba(156, 163, 175, 0.5);
             border-radius: 3px;
         }
-        /* Print rules */
+        /* Print rules: hoja A4 vertical, tabla ordenada y legible */
+        @page { size: A4 portrait; margin: 12mm; }
         @media print {
             .no-print { display: none !important; }
             .print-only { display: block !important; }
-            body { background: #ffffff !important; color: #000000 !important; padding: 0 !important; }
+            html, body { background: #ffffff !important; color: #000000 !important; padding: 0 !important; }
+            body { font-size: 10px !important; }
             .shadow-lg, .shadow-md, .shadow-sm { box-shadow: none !important; }
-            .border { border-color: #e5e7eb !important; }
+            .border { border-color: #cbd5e1 !important; }
+            .max-w-7xl { max-width: 100% !important; padding: 0 !important; }
+            .overflow-x-auto, .overflow-hidden { overflow: visible !important; }
+            table { width: 100% !important; table-layout: fixed; border-collapse: collapse !important; page-break-inside: auto; }
+            thead { display: table-header-group; }
+            tr { page-break-inside: avoid; }
+            th, td { border: 1px solid #cbd5e1 !important; padding: 4px 5px !important; font-size: 9px !important; vertical-align: middle; word-wrap: break-word; }
+            th { background: #1e40af !important; color: #ffffff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            tbody tr:nth-child(even) td { background: #f1f5f9 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            td select { appearance: none; -webkit-appearance: none; border: 0 !important; background: transparent !important; color: #000 !important; padding: 0 !important; text-align: center; width: 100%; }
+            span[class*="bg-"] { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
         }
+        /* Campo de fecha con teclado + calendario */
+        .date-field { position: relative; }
+        .date-field .date-native { position: absolute; right: 0; bottom: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
     </style>
 </head>
 <body class="bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-100 min-h-screen flex flex-col transition-colors duration-200">
+
+    <!-- Pantalla de bloqueo (PIN) -->
+    <div id="appLock" class="no-print fixed inset-0 z-[100] bg-slate-900 items-center justify-center p-6">
+        <form onsubmit="submitUnlock(event)" class="w-full max-w-xs text-center space-y-4">
+            <div class="mx-auto w-16 h-16 rounded-2xl bg-blue-600 flex items-center justify-center text-white text-2xl shadow-lg"><i class="fa-solid fa-lock"></i></div>
+            <h2 class="app-name text-white text-xl font-bold">TaskFlow Pro</h2>
+            <p class="text-slate-400 text-sm">Ingresa tu PIN para continuar</p>
+            <input id="unlockPin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off" placeholder="••••" class="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-white text-center text-2xl tracking-[0.5em] outline-none focus:ring-2 focus:ring-blue-500">
+            <p id="unlockError" class="text-rose-400 text-xs min-h-[1rem]"></p>
+            <button type="submit" class="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-semibold transition">Desbloquear</button>
+            <button type="button" onclick="forgotPin()" class="text-xs text-slate-400 underline">Olvidé mi PIN</button>
+        </form>
+    </div>
+
 
     <header class="bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 sticky top-0 z-30 no-print transition-colors">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
@@ -80,7 +125,7 @@
                     <i class="fa-solid fa-list-check text-xl"></i>
                 </div>
                 <div>
-                    <h1 class="font-bold text-lg leading-tight text-slate-900 dark:text-white">TaskFlow Pro</h1>
+                    <h1 class="app-name font-bold text-lg leading-tight text-slate-900 dark:text-white">TaskFlow Pro</h1>
                     <p class="text-xs text-slate-500 dark:text-slate-400">Control & Gestión de Tareas</p>
                 </div>
             </div>
@@ -101,7 +146,7 @@
     <div id="pwaBanner" class="hidden no-print bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-4 py-2.5 text-xs sm:text-sm flex justify-between items-center shadow-inner">
         <div class="flex items-center gap-2">
             <i class="fa-solid fa-mobile-screen-button text-lg"></i>
-            <span>Instala <strong>TaskFlow Pro</strong> en tu dispositivo para soporte offline completo.</span>
+            <span>Instala <strong class="app-name">TaskFlow Pro</strong> en tu dispositivo para soporte offline completo.</span>
         </div>
         <div class="flex items-center gap-2">
             <button onclick="installPwaPrompt()" class="bg-white text-blue-700 px-3 py-1 rounded-md font-semibold hover:bg-blue-50 transition text-xs">Instalar</button>
@@ -121,6 +166,9 @@
                     <i class="fa-solid fa-tasks text-base"></i> <span class="hidden sm:inline md:inline">Tareas</span>
                     <span id="taskBadgeCount" class="ml-auto bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs px-2 py-0.5 rounded-full hidden md:inline">0</span>
                 </button>
+                <button onclick="switchTab('calendar')" id="tab-calendar" class="nav-tab flex-1 md:flex-none flex items-center justify-center md:justify-start gap-2.5 px-3 py-2.5 rounded-xl font-medium text-xs sm:text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/50 transition">
+                    <i class="fa-solid fa-calendar-days text-base"></i> <span class="hidden sm:inline md:inline">Calendario</span>
+                </button>
                 <button onclick="switchTab('analytics')" id="tab-analytics" class="nav-tab flex-1 md:flex-none flex items-center justify-center md:justify-start gap-2.5 px-3 py-2.5 rounded-xl font-medium text-xs sm:text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/50 transition">
                     <i class="fa-solid fa-chart-line text-base"></i> <span class="hidden sm:inline md:inline">Estadísticas</span>
                 </button>
@@ -134,6 +182,17 @@
         <main class="flex-1 min-w-0">
 
             <section id="view-dashboard" class="space-y-6">
+                <!-- Aviso de copia de seguridad -->
+                <div id="backupBanner" class="hidden no-print flex flex-wrap items-center justify-between gap-2 p-3 rounded-2xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-200 text-xs">
+                    <span><i class="fa-solid fa-database mr-1"></i> <span id="backupBannerText"></span></span>
+                    <span class="flex gap-2">
+                        <button onclick="exportBackupJSON()" class="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-semibold">Exportar ahora</button>
+                        <button onclick="snoozeBackup()" class="px-3 py-1.5 bg-white/70 dark:bg-slate-800 rounded-lg font-semibold">Después</button>
+                    </span>
+                </div>
+                <!-- Vencimientos -->
+                <div id="dueAlertsCard" class="hidden bg-white dark:bg-slate-800 p-4 rounded-2xl border border-amber-200 dark:border-amber-800/60 shadow-sm"></div>
+
                 <!-- KPI Grid -->
                 <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
                     <div class="bg-white dark:bg-slate-800 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm flex items-center gap-3">
@@ -231,8 +290,14 @@
                         </div>
                         
                         <div class="flex items-center gap-2">
-                            <button onclick="exportToCSV()" title="Exportar a Excel/CSV" class="px-3 py-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition">
+                            <button onclick="openReportModal('xlsx')" title="Exportar a Excel (.xlsx)" class="px-3 py-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition">
                                 <i class="fa-solid fa-file-excel text-emerald-600"></i> Excel
+                            </button>
+                            <button onclick="openReportModal('pdf')" title="Exportar a PDF" class="px-3 py-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition">
+                                <i class="fa-solid fa-file-pdf text-rose-500"></i> PDF
+                            </button>
+                            <button onclick="openTrashModal()" title="Papelera" class="px-3 py-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition">
+                                <i class="fa-solid fa-trash-can text-slate-500"></i> <span class="trash-count">0</span>
                             </button>
                             <button onclick="openNewTaskModal()" class="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-sm transition">
                                 <i class="fa-solid fa-plus"></i> Nueva Tarea
@@ -240,7 +305,7 @@
                         </div>
                     </div>
 
-                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 text-xs">
                         <div>
                             <label class="block text-slate-500 dark:text-slate-400 mb-1 font-medium">Estado</label>
                             <select id="filterStatus" onchange="applyFilters()" class="w-full p-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg outline-none">
@@ -273,11 +338,28 @@
                                 <option value="ALL">Todas las Categorías</option>
                             </select>
                         </div>
+                        <div>
+                            <label class="block text-slate-500 dark:text-slate-400 mb-1 font-medium">Responsable</label>
+                            <select id="filterAssignee" onchange="applyFilters()" class="w-full p-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg outline-none">
+                                <option value="ALL">Todos los Responsables</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-slate-500 dark:text-slate-400 mb-1 font-medium">Ordenar por</label>
+                            <select id="sortBy" onchange="applyFilters()" class="w-full p-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg outline-none">
+                                <option value="id">Orden de creación</option>
+                                <option value="end">Fecha final (próximas primero)</option>
+                                <option value="start">Fecha de inicio</option>
+                                <option value="priority">Prioridad (Alta primero)</option>
+                                <option value="status">Estado</option>
+                                <option value="title">Nombre (A-Z)</option>
+                            </select>
+                        </div>
                     </div>
                 </div>
 
                 <div class="print-only hidden p-4 mb-4 border-b">
-                    <h1 class="text-2xl font-bold">Informe de Control de Tareas</h1>
+                    <h1 class="text-2xl font-bold"><span class="app-name">TaskFlow Pro</span> - Informe de Control de Tareas</h1>
                     <p class="text-sm text-gray-600">Generado el: <span id="printDate"></span></p>
                 </div>
 
@@ -307,6 +389,30 @@
                         <p class="text-sm">No se encontraron tareas con los filtros aplicados.</p>
                     </div>
                 </div>
+            </section>
+
+            <section id="view-calendar" class="hidden space-y-4 no-print">
+                <div class="bg-white dark:bg-slate-800 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm">
+                    <div class="flex items-center justify-between mb-3">
+                        <button onclick="calNav(-1)" class="w-9 h-9 rounded-xl bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600"><i class="fa-solid fa-chevron-left"></i></button>
+                        <div class="text-center">
+                            <h3 id="calTitle" class="font-bold text-base"></h3>
+                            <button onclick="calToday()" class="text-xs text-blue-600 dark:text-blue-400 font-medium hover:underline">Ir a hoy</button>
+                        </div>
+                        <button onclick="calNav(1)" class="w-9 h-9 rounded-xl bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600"><i class="fa-solid fa-chevron-right"></i></button>
+                    </div>
+                    <div class="grid grid-cols-7 gap-1 text-center text-[10px] font-semibold text-slate-400 uppercase mb-1">
+                        <div>Lun</div><div>Mar</div><div>Mié</div><div>Jue</div><div>Vie</div><div>Sáb</div><div>Dom</div>
+                    </div>
+                    <div id="calendarGrid" class="grid grid-cols-7 gap-1"></div>
+                    <div class="flex flex-wrap gap-3 mt-3 text-[10px] text-slate-500">
+                        <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-red-500"></span> Alta</span>
+                        <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-amber-500"></span> Media</span>
+                        <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-blue-500"></span> Baja</span>
+                        <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-500"></span> Completada</span>
+                    </div>
+                </div>
+                <div id="calDayList" class="bg-white dark:bg-slate-800 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm"></div>
             </section>
 
             <section id="view-analytics" class="hidden space-y-6">
@@ -350,6 +456,83 @@
             </section>
 
             <section id="view-settings" class="hidden space-y-6">
+                <!-- Personalización -->
+                <div class="bg-white dark:bg-slate-800 p-5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm space-y-4 no-print">
+                    <h3 class="font-semibold text-slate-800 dark:text-slate-100 text-sm flex items-center gap-2"><i class="fa-solid fa-signature text-blue-500"></i> Nombre y logo de la app</h3>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs sm:text-sm">
+                        <div>
+                            <label class="block font-medium text-slate-700 dark:text-slate-300 mb-1">Nombre de la aplicación</label>
+                            <input type="text" id="appNameInput" maxlength="40" placeholder="TaskFlow Pro" class="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-blue-500">
+                        </div>
+                        <div>
+                            <label class="block font-medium text-slate-700 dark:text-slate-300 mb-1">Preparado por (aparece en los reportes)</label>
+                            <input type="text" id="ownerNameInput" maxlength="60" placeholder="Tu nombre o empresa" class="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-blue-500">
+                        </div>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-3">
+                        <div id="logoPreview" class="min-w-[90px] h-16 px-3 flex items-center justify-center bg-slate-50 dark:bg-slate-900 border border-dashed border-slate-300 dark:border-slate-600 rounded-xl"></div>
+                        <label class="px-4 py-2.5 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition cursor-pointer"><i class="fa-solid fa-image text-blue-500"></i> Subir logo para reportes
+                            <input type="file" accept="image/*" class="hidden" onchange="handleLogoUpload(event)">
+                        </label>
+                        <button id="logoRemoveBtn" onclick="removeLogo()" class="px-4 py-2.5 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition hidden"><i class="fa-solid fa-xmark text-rose-500"></i> Quitar logo</button>
+                    </div>
+                    <button onclick="saveAppIdentity()" class="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold shadow-sm transition">Guardar nombre</button>
+                    <p class="text-[11px] text-slate-400">El nombre se cambia dentro de la app y en los reportes. El nombre bajo el ícono del celular lo define el manifest al instalar.</p>
+                </div>
+
+                <!-- Categorías -->
+                <div class="bg-white dark:bg-slate-800 p-5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm space-y-4 no-print">
+                    <h3 class="font-semibold text-slate-800 dark:text-slate-100 text-sm flex items-center gap-2"><i class="fa-solid fa-tags text-purple-500"></i> Categorías</h3>
+                    <div id="categoryManager" class="space-y-1.5"></div>
+                    <div class="flex items-center gap-2">
+                        <input type="color" id="newCategoryColor" value="#2563eb" class="w-10 h-10 rounded-lg border-0 bg-transparent cursor-pointer shrink-0">
+                        <input type="text" id="newCategoryName" maxlength="30" placeholder="Nueva categoría..." onkeydown="if(event.key==='Enter'){event.preventDefault();addCategory();}" class="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 text-sm">
+                        <button onclick="addCategory()" class="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold shrink-0"><i class="fa-solid fa-plus"></i> Añadir</button>
+                    </div>
+                </div>
+
+                <!-- Seguridad -->
+                <div class="bg-white dark:bg-slate-800 p-5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm space-y-4 no-print">
+                    <h3 class="font-semibold text-slate-800 dark:text-slate-100 text-sm flex items-center gap-2"><i class="fa-solid fa-lock text-emerald-500"></i> Seguridad (PIN) <span id="pinState" class="ml-auto"></span></h3>
+                    <p class="text-xs text-slate-500 dark:text-slate-400">El PIN bloquea la app al abrirla. Protege de miradas ajenas en este dispositivo; para datos sensibles no lo uses como único resguardo.</p>
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <button id="pinCreateBtn" onclick="openPinModal('create')" class="px-4 py-2.5 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition"><i class="fa-solid fa-key text-emerald-500"></i> Crear PIN</button>
+                        <button id="pinChangeBtn" onclick="openPinModal('change')" class="px-4 py-2.5 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition hidden"><i class="fa-solid fa-key text-blue-500"></i> Cambiar PIN</button>
+                        <button id="pinRemoveBtn" onclick="openPinModal('remove')" class="px-4 py-2.5 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition hidden"><i class="fa-solid fa-lock-open text-rose-500"></i> Quitar PIN</button>
+                    </div>
+                    <div id="lockMinutesWrap" class="hidden text-xs sm:text-sm">
+                        <label class="block font-medium text-slate-700 dark:text-slate-300 mb-1">Bloquear automáticamente</label>
+                        <select id="lockMinutes" onchange="updateSetting('lockMinutes', this.value)" class="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="-1">Solo al abrir la app</option>
+                            <option value="0">Al salir de la app</option>
+                            <option value="1">Tras 1 minuto fuera</option>
+                            <option value="5">Tras 5 minutos fuera</option>
+                            <option value="15">Tras 15 minutos fuera</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Avisos y copias -->
+                <div class="bg-white dark:bg-slate-800 p-5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm space-y-4 no-print">
+                    <h3 class="font-semibold text-slate-800 dark:text-slate-100 text-sm flex items-center gap-2"><i class="fa-solid fa-bell text-amber-500"></i> Avisos, copias y papelera</h3>
+                    <label class="flex items-center gap-2 text-sm cursor-pointer">
+                        <input type="checkbox" id="dailySummaryToggle" onchange="updateSetting('dailySummary', this.checked)" class="w-4 h-4 accent-blue-600">
+                        Mostrar el resumen de vencimientos al abrir la app (una vez al día)
+                    </label>
+                    <button id="notifyBtn" onclick="enableNotifications()" class="px-4 py-2.5 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition"></button>
+                    <p class="text-[11px] text-slate-400">Los avisos del sistema aparecen cuando abres la app. Sin un servidor no es posible avisar con la app cerrada.</p>
+                    <div class="text-xs sm:text-sm">
+                        <label class="block font-medium text-slate-700 dark:text-slate-300 mb-1">Recordarme hacer una copia de seguridad</label>
+                        <select id="backupDays" onchange="updateSetting('backupDays', this.value)" class="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="7">Cada 7 días</option>
+                            <option value="15">Cada 15 días</option>
+                            <option value="30">Cada 30 días</option>
+                            <option value="0">Nunca</option>
+                        </select>
+                    </div>
+                    <button onclick="openTrashModal()" class="px-4 py-2.5 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition"><i class="fa-solid fa-trash-can text-slate-500"></i> Abrir papelera (<span class="trash-count">0</span>)</button>
+                </div>
+
                 <!-- Theme -->
                 <div class="bg-white dark:bg-slate-800 p-5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm space-y-4">
                     <h3 class="font-semibold text-slate-800 dark:text-slate-100 text-sm flex items-center gap-2">
@@ -392,10 +575,10 @@
                         <i class="fa-solid fa-share-nodes text-purple-500"></i> Reportes y Compartir
                     </h3>
                     <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                        <button onclick="window.print()" class="px-4 py-2.5 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition">
+                        <button onclick="printSummary()" class="px-4 py-2.5 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition">
                             <i class="fa-solid fa-print"></i> Imprimir Resumen
                         </button>
-                        <button onclick="generatePDFReport()" class="px-4 py-2.5 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition">
+                        <button onclick="openReportModal('pdf')" class="px-4 py-2.5 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition">
                             <i class="fa-solid fa-file-pdf text-rose-500"></i> Generar Reporte PDF
                         </button>
                         <button onclick="shareTaskApp()" class="px-4 py-2.5 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition">
@@ -408,25 +591,25 @@
         </main>
     </div>
 
-    <div id="taskModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
-        <div class="bg-white dark:bg-slate-800 rounded-2xl max-w-lg w-full shadow-2xl overflow-hidden">
+    <div id="taskModal" class="no-print fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-start justify-center hidden p-3 overflow-y-auto">
+        <div class="bg-white dark:bg-slate-800 rounded-2xl max-w-lg w-full shadow-2xl my-4 sm:my-8 overflow-hidden">
             <div class="px-6 py-4 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-700/50">
                 <h3 id="modalTitle" class="font-bold text-slate-800 dark:text-white text-base">Nueva Tarea</h3>
                 <button onclick="closeTaskModal()" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><i class="fa-solid fa-xmark text-lg"></i></button>
             </div>
-            
-            <form id="taskForm" onsubmit="saveTask(event)" class="p-6 space-y-4 text-xs sm:text-sm">
+
+            <form id="taskForm" onsubmit="saveTask(event)" class="p-5 sm:p-6 space-y-4 text-xs sm:text-sm">
                 <input type="hidden" id="editTaskId">
-                
+
                 <div>
                     <label class="block font-medium text-slate-700 dark:text-slate-300 mb-1">Descripción / Tarea *</label>
-                    <input type="text" id="taskTitle" required placeholder="Ej. Preparar informe mensual" class="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none">
+                    <input type="text" id="taskTitle" required maxlength="150" placeholder="Ej. Preparar informe mensual" class="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-blue-500">
                 </div>
 
                 <div class="grid grid-cols-2 gap-3">
                     <div>
                         <label class="block font-medium text-slate-700 dark:text-slate-300 mb-1">Prioridad</label>
-                        <select id="taskPriority" class="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl outline-none">
+                        <select id="taskPriority" class="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-blue-500">
                             <option value="Alta">Alta</option>
                             <option value="Media" selected>Media</option>
                             <option value="Baja">Baja</option>
@@ -434,26 +617,53 @@
                     </div>
                     <div>
                         <label class="block font-medium text-slate-700 dark:text-slate-300 mb-1">Categoría</label>
-                        <input type="text" id="taskCategory" placeholder="Ej. Trabajo, Personal..." list="categorySuggestions" class="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl outline-none">
-                        <datalist id="categorySuggestions"></datalist>
+                        <div class="flex gap-1.5">
+                            <select id="taskCategory" class="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 min-w-0"></select>
+                            <button type="button" onclick="addCategoryFromModal()" title="Nueva categoría" class="px-3 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 rounded-xl text-blue-600"><i class="fa-solid fa-plus"></i></button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block font-medium text-slate-700 dark:text-slate-300 mb-1">Responsable</label>
+                        <input type="text" id="taskAssignee" maxlength="40" list="assigneeSuggestions" placeholder="Nombre (opcional)" class="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-blue-500">
+                        <datalist id="assigneeSuggestions"></datalist>
+                    </div>
+                    <div>
+                        <label class="block font-medium text-slate-700 dark:text-slate-300 mb-1">Repetir</label>
+                        <select id="taskRepeat" class="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="none">No se repite</option>
+                            <option value="daily">Cada día</option>
+                            <option value="weekly">Cada semana</option>
+                            <option value="monthly">Cada mes</option>
+                        </select>
                     </div>
                 </div>
 
                 <div class="grid grid-cols-2 gap-3">
                     <div>
                         <label class="block font-medium text-slate-700 dark:text-slate-300 mb-1">Fecha de Inicio *</label>
-                        <input type="date" id="taskStartDate" required onchange="calculateDurationInModal()" class="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl outline-none">
+                        <div class="date-field">
+                            <input type="text" id="taskStartDate" required inputmode="numeric" autocomplete="off" maxlength="10" placeholder="dd/mm/aaaa" oninput="maskDateInput(this); calculateDurationInModal()" class="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 pl-3.5 pr-10">
+                            <button type="button" tabindex="-1" onclick="openDatePicker('taskStartDate')" title="Abrir calendario" class="absolute right-1.5 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center text-slate-400 hover:text-blue-600 rounded-lg"><i class="fa-regular fa-calendar"></i></button>
+                            <input type="date" id="taskStartDateNative" tabindex="-1" aria-hidden="true" class="date-native" onchange="pickNativeDate('taskStartDate', this.value)">
+                        </div>
                     </div>
                     <div>
                         <label class="block font-medium text-slate-700 dark:text-slate-300 mb-1">Fecha Final *</label>
-                        <input type="date" id="taskEndDate" required onchange="calculateDurationInModal()" class="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl outline-none">
+                        <div class="date-field">
+                            <input type="text" id="taskEndDate" required inputmode="numeric" autocomplete="off" maxlength="10" placeholder="dd/mm/aaaa" oninput="maskDateInput(this); calculateDurationInModal()" class="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 pl-3.5 pr-10">
+                            <button type="button" tabindex="-1" onclick="openDatePicker('taskEndDate')" title="Abrir calendario" class="absolute right-1.5 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center text-slate-400 hover:text-blue-600 rounded-lg"><i class="fa-regular fa-calendar"></i></button>
+                            <input type="date" id="taskEndDateNative" tabindex="-1" aria-hidden="true" class="date-native" onchange="pickNativeDate('taskEndDate', this.value)">
+                        </div>
                     </div>
                 </div>
 
                 <div class="grid grid-cols-2 gap-3">
                     <div>
                         <label class="block font-medium text-slate-700 dark:text-slate-300 mb-1">Estado</label>
-                        <select id="taskStatus" class="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl outline-none">
+                        <select id="taskStatus" class="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-blue-500">
                             <option value="No empezado">No empezado</option>
                             <option value="En curso">En curso</option>
                             <option value="Completado">Completado</option>
@@ -465,11 +675,98 @@
                     </div>
                 </div>
 
+                <div>
+                    <label class="block font-medium text-slate-700 dark:text-slate-300 mb-1">Subtareas</label>
+                    <div id="subtaskList" class="space-y-1.5 mb-2"></div>
+                    <div class="flex gap-2">
+                        <input type="text" id="newSubtaskInput" maxlength="120" placeholder="Agregar un paso..." onkeydown="if(event.key==='Enter'){event.preventDefault();addSubtaskFromInput();}" class="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-blue-500">
+                        <button type="button" onclick="addSubtaskFromInput()" class="px-3.5 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 rounded-xl font-semibold text-blue-600 shrink-0">Agregar</button>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block font-medium text-slate-700 dark:text-slate-300 mb-1">Notas</label>
+                    <textarea id="taskNotes" rows="3" maxlength="1000" placeholder="Detalles, enlaces, observaciones..." class="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+                </div>
+
                 <div class="pt-4 flex justify-end gap-2 border-t border-slate-200 dark:border-slate-700">
                     <button type="button" onclick="closeTaskModal()" class="px-4 py-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 text-slate-700 dark:text-slate-300 rounded-xl font-medium transition">Cancelar</button>
                     <button type="submit" class="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-semibold shadow-md transition">Guardar Tarea</button>
                 </div>
             </form>
+        </div>
+    </div>
+
+    <div id="pinModal" class="no-print fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] flex items-start justify-center hidden p-3 overflow-y-auto">
+        <div class="bg-white dark:bg-slate-800 rounded-2xl max-w-md w-full shadow-2xl my-8 overflow-hidden">
+            <div class="px-5 py-4 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-700/50">
+                <h3 id="pinModalTitle" class="font-bold text-slate-800 dark:text-white text-base">PIN</h3>
+                <button onclick="closePinModal()" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><i class="fa-solid fa-xmark text-lg"></i></button>
+            </div>
+            <form onsubmit="submitPinModal(event)" class="p-5 space-y-3 text-sm">
+                <div id="pinCurrentWrap"><label class="block font-medium text-slate-700 dark:text-slate-300 mb-1">PIN actual</label><input id="pinCurrent" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off" class="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-blue-500"></div>
+                <div id="pinNewWrap" class="space-y-3">
+                    <div><label class="block font-medium text-slate-700 dark:text-slate-300 mb-1">Nuevo PIN (4 a 6 números)</label><input id="pinNew" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off" class="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-blue-500"></div>
+                    <div><label class="block font-medium text-slate-700 dark:text-slate-300 mb-1">Repite el PIN</label><input id="pinConfirm" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off" class="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-blue-500"></div>
+                </div>
+                <p id="pinModalError" class="text-rose-500 text-xs min-h-[1rem]"></p>
+                <div class="flex justify-end gap-2">
+                    <button type="button" onclick="closePinModal()" class="px-4 py-2 bg-slate-100 dark:bg-slate-700 rounded-xl font-medium">Cancelar</button>
+                    <button type="submit" class="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-semibold">Aceptar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="reportModal" class="no-print fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-start justify-center hidden p-3 overflow-y-auto">
+        <div class="bg-white dark:bg-slate-800 rounded-2xl max-w-md w-full shadow-2xl my-8 overflow-hidden">
+            <div class="px-5 py-4 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-700/50">
+                <h3 id="reportModalTitle" class="font-bold text-slate-800 dark:text-white text-base">Reporte</h3>
+                <button onclick="closeReportModal()" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><i class="fa-solid fa-xmark text-lg"></i></button>
+            </div>
+            <form onsubmit="runReport(event)" class="p-5 space-y-4 text-sm">
+                <div><label class="block font-medium text-slate-700 dark:text-slate-300 mb-1">Título del reporte</label><input id="reportTitleInput" type="text" maxlength="80" class="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-blue-500"></div>
+                <div>
+                    <label class="block font-medium text-slate-700 dark:text-slate-300 mb-1">¿Qué tareas incluir?</label>
+                    <label class="flex items-center gap-2 p-2.5 rounded-xl bg-slate-50 dark:bg-slate-900 mb-1.5 cursor-pointer"><input type="radio" name="reportScope" value="all" checked class="accent-blue-600"> Todas las tareas (<span id="reportAllCount">0</span>)</label>
+                    <label class="flex items-center gap-2 p-2.5 rounded-xl bg-slate-50 dark:bg-slate-900 cursor-pointer"><input type="radio" name="reportScope" value="filtered" class="accent-blue-600"> Solo las filtradas en pantalla (<span id="reportFilteredCount">0</span>)</label>
+                    <p id="reportFilterDesc" class="text-[11px] text-slate-400 mt-1.5"></p>
+                </div>
+                <div id="reportOrientWrap"><label class="block font-medium text-slate-700 dark:text-slate-300 mb-1">Orientación de la hoja A4</label>
+                    <select id="reportOrientation" class="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-blue-500"><option value="portrait">Vertical</option><option value="landscape">Horizontal</option></select>
+                </div>
+                <div class="flex justify-end gap-2 pt-1">
+                    <button type="button" onclick="closeReportModal()" class="px-4 py-2 bg-slate-100 dark:bg-slate-700 rounded-xl font-medium">Cancelar</button>
+                    <button type="submit" class="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-semibold"><i class="fa-solid fa-download mr-1"></i> Generar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="trashModal" class="no-print fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-start justify-center hidden p-3 overflow-y-auto">
+        <div class="bg-white dark:bg-slate-800 rounded-2xl max-w-md w-full shadow-2xl my-8 overflow-hidden">
+            <div class="px-5 py-4 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-700/50">
+                <h3 class="font-bold text-slate-800 dark:text-white text-base">Papelera</h3>
+                <button onclick="closeTrashModal()" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><i class="fa-solid fa-xmark text-lg"></i></button>
+            </div>
+            <div class="p-5 space-y-3">
+                <p class="text-[11px] text-slate-400">Las tareas eliminadas se conservan 30 días.</p>
+                <div id="trashList" class="space-y-1.5 max-h-[55vh] overflow-y-auto"></div>
+                <div class="flex justify-end"><button onclick="emptyTrash()" class="px-4 py-2 text-xs font-semibold bg-rose-50 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400 rounded-xl">Vaciar papelera</button></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="dueModal" class="no-print fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-start justify-center hidden p-3 overflow-y-auto">
+        <div class="bg-white dark:bg-slate-800 rounded-2xl max-w-md w-full shadow-2xl my-8 overflow-hidden">
+            <div class="px-5 py-4 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-700/50">
+                <h3 class="font-bold text-slate-800 dark:text-white text-base"><i class="fa-solid fa-bell text-amber-500"></i> Resumen de vencimientos</h3>
+                <button onclick="closeDueModal()" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><i class="fa-solid fa-xmark text-lg"></i></button>
+            </div>
+            <div class="p-5">
+                <div id="dueModalBody"></div>
+                <div class="flex justify-end"><button onclick="closeDueModal()" class="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-semibold">Entendido</button></div>
+            </div>
         </div>
     </div>
 
@@ -497,18 +794,6 @@
             registerServiceWorker();
         });
 
-        function initApp() {
-            try {
-                loadTasks();
-                initTheme();
-                renderCategoryOptions();
-                applyFilters();
-                const printElem = document.getElementById('printDate');
-                if (printElem) printElem.innerText = new Date().toLocaleDateString('es-ES');
-            } catch (err) {
-                console.error("Error al inicializar la aplicación:", err);
-            }
-        }
 
         // Registro de Service Worker para subdirectorios de GitHub Pages
         function registerServiceWorker() {
@@ -529,19 +814,6 @@
             });
         }
 
-        function loadTasks() {
-            const saved = localStorage.getItem('taskflow_tasks_v2');
-            if (saved) {
-                try {
-                    tasks = JSON.parse(saved);
-                } catch(e) {
-                    tasks = [...DEFAULT_TASKS];
-                }
-            } else {
-                tasks = [...DEFAULT_TASKS];
-                saveTasksToStorage();
-            }
-        }
 
         function saveTasksToStorage() {
             localStorage.setItem('taskflow_tasks_v2', JSON.stringify(tasks));
@@ -710,198 +982,25 @@
             }
         }
 
-        function applyFilters() {
-            const query = document.getElementById('searchInput').value.toLowerCase();
-            const statusFilter = document.getElementById('filterStatus').value;
-            const priorityFilter = document.getElementById('filterPriority').value;
-            const delayFilter = document.getElementById('filterDelay').value;
-            const categoryFilter = document.getElementById('filterCategory').value;
 
-            const filtered = tasks.filter(task => {
-                const matchesQuery = task.title.toLowerCase().includes(query) || (task.category && task.category.toLowerCase().includes(query));
-                const matchesStatus = statusFilter === 'ALL' || task.status === statusFilter;
-                const matchesPriority = priorityFilter === 'ALL' || task.priority === priorityFilter;
-                
-                const isDelayed = isTaskDelayed(task);
-                const matchesDelay = delayFilter === 'ALL' || (delayFilter === 'Demorado' && isDelayed) || (delayFilter === 'En Plazo' && !isDelayed);
-                const matchesCategory = categoryFilter === 'ALL' || (task.category || 'General') === categoryFilter;
 
-                return matchesQuery && matchesStatus && matchesPriority && matchesDelay && matchesCategory;
-            });
 
-            renderTaskTable(filtered);
-            updateDashboardMetrics();
-        }
-
-        function renderTaskTable(taskList) {
-            const tbody = document.getElementById('taskTableBody');
-            const noMsg = document.getElementById('noTasksMsg');
-
-            if (taskList.length === 0) {
-                tbody.innerHTML = '';
-                noMsg.classList.remove('hidden');
-                return;
-            }
-
-            noMsg.classList.add('hidden');
-            tbody.innerHTML = taskList.map(t => {
-                const duration = calculateDurationDays(t.startDate, t.endDate);
-                const delayed = isTaskDelayed(t);
-                const delayBadge = delayed 
-                    ? `<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300"><i class="fa-solid fa-triangle-exclamation"></i> Demorado</span>`
-                    : `<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">En Plazo</span>`;
-
-                const priorityBadge = t.priority === 'Alta' 
-                    ? `<span class="px-2 py-0.5 rounded-md text-xs font-semibold bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300">Alta</span>`
-                    : (t.priority === 'Media'
-                        ? `<span class="px-2 py-0.5 rounded-md text-xs font-semibold bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">Media</span>`
-                        : `<span class="px-2 py-0.5 rounded-md text-xs font-semibold bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">Baja</span>`);
-
-                const statusColor = t.status === 'Completado' 
-                    ? 'bg-emerald-500 text-white' 
-                    : (t.status === 'En curso' ? 'bg-amber-500 text-white' : 'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300');
-
-                return `
-                    <tr class="hover:bg-slate-50 dark:hover:bg-slate-700/30 transition">
-                        <td class="p-3 text-center font-bold text-slate-400">#${t.id}</td>
-                        <td class="p-3">
-                            <div class="font-medium text-slate-800 dark:text-slate-100 ${t.status==='Completado'?'line-through text-slate-400':''}">${t.title}</div>
-                            <span class="text-[10px] bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 px-1.5 py-0.5 rounded">${t.category || 'General'}</span>
-                        </td>
-                        <td class="p-3 text-center">${priorityBadge}</td>
-                        <td class="p-3 text-center text-xs text-slate-500 dark:text-slate-400">
-                            <div>${t.startDate || '-'}</div>
-                            <div class="text-[10px] text-slate-400">hasta ${t.endDate || '-'}</div>
-                        </td>
-                        <td class="p-3 text-center font-medium">${duration} días</td>
-                        <td class="p-3 text-center">
-                            <select onchange="changeTaskStatus(${t.id}, this.value)" class="text-xs px-2.5 py-1 rounded-lg border-0 cursor-pointer ${statusColor} font-medium outline-none">
-                                <option value="No empezado" ${t.status==='No empezado'?'selected':''}>No empezado</option>
-                                <option value="En curso" ${t.status==='En curso'?'selected':''}>En curso</option>
-                                <option value="Completado" ${t.status==='Completado'?'selected':''}>Completado</option>
-                            </select>
-                        </td>
-                        <td class="p-3 text-center">${delayBadge}</td>
-                        <td class="p-3 text-center no-print">
-                            <div class="flex justify-center items-center gap-1">
-                                <button onclick="openEditTaskModal(${t.id})" title="Editar" class="p-1.5 hover:bg-slate-200 dark:hover:bg-slate-600 rounded-lg text-slate-600 dark:text-slate-300 transition">
-                                    <i class="fa-solid fa-pen-to-square"></i>
-                                </button>
-                                <button onclick="deleteTask(${t.id})" title="Eliminar" class="p-1.5 hover:bg-rose-100 dark:hover:bg-rose-900/40 rounded-lg text-rose-600 dark:text-rose-400 transition">
-                                    <i class="fa-solid fa-trash-can"></i>
-                                </button>
-                            </div>
-                        </td>
-                    </tr>
-                `;
-            }).join('');
-        }
-
-        function openNewTaskModal() {
-            document.getElementById('editTaskId').value = '';
-            document.getElementById('modalTitle').innerText = 'Nueva Tarea';
-            document.getElementById('taskForm').reset();
-            
-            const todayStr = new Date().toISOString().split('T')[0];
-            document.getElementById('taskStartDate').value = todayStr;
-            document.getElementById('taskEndDate').value = todayStr;
-            calculateDurationInModal();
-
-            document.getElementById('taskModal').classList.remove('hidden');
-        }
-
-        function openEditTaskModal(id) {
-            const task = tasks.find(t => t.id === id);
-            if (!task) return;
-
-            document.getElementById('editTaskId').value = task.id;
-            document.getElementById('modalTitle').innerText = 'Editar Tarea #' + task.id;
-            document.getElementById('taskTitle').value = task.title;
-            document.getElementById('taskPriority').value = task.priority;
-            document.getElementById('taskCategory').value = task.category || '';
-            document.getElementById('taskStartDate').value = task.startDate;
-            document.getElementById('taskEndDate').value = task.endDate;
-            document.getElementById('taskStatus').value = task.status;
-
-            calculateDurationInModal();
-            document.getElementById('taskModal').classList.remove('hidden');
-        }
 
         function closeTaskModal() {
             document.getElementById('taskModal').classList.add('hidden');
         }
 
         function calculateDurationInModal() {
-            const start = document.getElementById('taskStartDate').value;
-            const end = document.getElementById('taskEndDate').value;
+            const start = getDateValue('taskStartDate');
+            const end = getDateValue('taskEndDate');
             const duration = calculateDurationDays(start, end);
             document.getElementById('taskDurationDisplay').value = duration + ' día(s)';
         }
 
-        function saveTask(e) {
-            e.preventDefault();
-            const id = document.getElementById('editTaskId').value;
-            const title = document.getElementById('taskTitle').value.trim();
-            const priority = document.getElementById('taskPriority').value;
-            const category = document.getElementById('taskCategory').value.trim() || 'General';
-            const startDate = document.getElementById('taskStartDate').value;
-            const endDate = document.getElementById('taskEndDate').value;
-            const status = document.getElementById('taskStatus').value;
 
-            if (id) {
-                const index = tasks.findIndex(t => t.id == id);
-                if (index !== -1) {
-                    tasks[index] = { ...tasks[index], title, priority, category, startDate, endDate, status };
-                }
-            } else {
-                const newId = tasks.length > 0 ? Math.max(...tasks.map(t => t.id)) + 1 : 1;
-                tasks.push({ id: newId, title, priority, category, startDate, endDate, status });
-            }
 
-            saveTasksToStorage();
-            renderCategoryOptions();
-            applyFilters();
-            closeTaskModal();
-        }
 
-        function changeTaskStatus(id, newStatus) {
-            const task = tasks.find(t => t.id === id);
-            if (task) {
-                task.status = newStatus;
-                saveTasksToStorage();
-                applyFilters();
-            }
-        }
 
-        function deleteTask(id) {
-            if (confirm('¿Estás seguro de que deseas eliminar esta tarea?')) {
-                tasks = tasks.filter(t => t.id !== id);
-                saveTasksToStorage();
-                applyFilters();
-            }
-        }
-
-        function renderCategoryOptions() {
-            const categories = Array.from(new Set(tasks.map(t => t.category || 'General')));
-            const filterCat = document.getElementById('filterCategory');
-            filterCat.innerHTML = `<option value="ALL">Todas las Categorías</option>` + categories.map(c => `<option value="${c}">${c}</option>`).join('');
-
-            const datalist = document.getElementById('categorySuggestions');
-            datalist.innerHTML = categories.map(c => `<option value="${c}">`).join('');
-        }
-
-        function switchTab(tabId) {
-            document.querySelectorAll('main > section').forEach(sec => sec.classList.add('hidden'));
-            document.querySelectorAll('.nav-tab').forEach(tab => {
-                tab.classList.remove('bg-blue-50', 'dark:bg-blue-900/40', 'text-blue-600', 'dark:text-blue-400');
-                tab.classList.add('text-slate-600', 'dark:text-slate-300');
-            });
-
-            document.getElementById('view-' + tabId).classList.remove('hidden');
-            const activeNav = document.getElementById('tab-' + tabId);
-            activeNav.classList.add('bg-blue-50', 'dark:bg-blue-900/40', 'text-blue-600', 'dark:text-blue-400');
-            activeNav.classList.remove('text-slate-600', 'dark:text-slate-300');
-        }
 
         function initTheme() {
             const savedTheme = localStorage.getItem('taskflow_theme');
@@ -925,116 +1024,1629 @@
             if (dot) dot.style.transform = isDark ? 'translateX(24px)' : 'translateX(0px)';
         }
 
+
+
+
+        // ===================== Utilidades de fecha (teclado + calendario) =====================
+        function todayISO() {
+            const d = new Date();
+            const m = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            return `${d.getFullYear()}-${m}-${day}`;
+        }
+
+        // yyyy-mm-dd -> dd/mm/aaaa
+        function fmtDate(iso) {
+            if (!iso) return '-';
+            const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+            return m ? `${m[3]}/${m[2]}/${m[1]}` : iso;
+        }
+
+        // dd/mm/aaaa -> yyyy-mm-dd (o '' si no es válida)
+        function displayToIso(txt) {
+            const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec((txt || '').trim());
+            if (!m) return '';
+            const d = +m[1], mo = +m[2], y = +m[3];
+            const dt = new Date(y, mo - 1, d);
+            if (dt.getFullYear() !== y || dt.getMonth() !== mo - 1 || dt.getDate() !== d) return '';
+            return `${m[3]}-${m[2]}-${m[1]}`;
+        }
+
+        function maskDateInput(el) {
+            const digits = el.value.replace(/\D/g, '').slice(0, 8);
+            let out = digits;
+            if (digits.length > 4) out = digits.slice(0, 2) + '/' + digits.slice(2, 4) + '/' + digits.slice(4);
+            else if (digits.length > 2) out = digits.slice(0, 2) + '/' + digits.slice(2);
+            el.value = out;
+        }
+
+        function getDateValue(id) { return displayToIso(document.getElementById(id).value); }
+        function setDateValue(id, iso) { document.getElementById(id).value = iso ? fmtDate(iso) : ''; }
+
+        function openDatePicker(id) {
+            const native = document.getElementById(id + 'Native');
+            native.value = getDateValue(id) || '';
+            try {
+                if (native.showPicker) native.showPicker(); else { native.focus(); native.click(); }
+            } catch (e) { native.focus(); native.click(); }
+        }
+
+        function pickNativeDate(id, iso) {
+            if (!iso) return;
+            setDateValue(id, iso);
+            calculateDurationInModal();
+        }
+
+        // ===================== Datos para reportes =====================
+
+        function downloadBlob(blob, filename) {
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.setAttribute('download', filename);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            setTimeout(() => URL.revokeObjectURL(link.href), 4000);
+        }
+
+        // ===================== Exportar a Excel (.xlsx con formato A4) =====================
+
+        // Alternativa si la librería de Excel no está disponible (sin conexión la primera vez)
+
+        // ===================== Reporte PDF (A4 vertical) =====================
+
+
+        // ===================== Ajustes, datos y utilidades =====================
+        const SETTINGS_KEY = 'taskflow_settings_v1';
+        const TRASH_KEY = 'taskflow_trash_v1';
+        const CAT_COLORS = ['#64748b', '#2563eb', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#06b6d4', '#ec4899'];
+        const DEFAULT_CATEGORIES = [
+            { name: 'General', color: '#64748b' }, { name: 'Trabajo', color: '#2563eb' }, { name: 'Personal', color: '#8b5cf6' },
+            { name: 'Salud', color: '#10b981' }, { name: 'Finanzas', color: '#f59e0b' }, { name: 'Oficina', color: '#06b6d4' }
+        ];
+        const REPEAT_LABELS = { none: 'No se repite', daily: 'Diaria', weekly: 'Semanal', monthly: 'Mensual' };
+        const PRIORITY_ORDER = { 'Alta': 0, 'Media': 1, 'Baja': 2 };
+        const STATUS_ORDER = { 'En curso': 0, 'No empezado': 1, 'Completado': 2 };
+
+        let settings = null;
+        let trash = [];
+        let currentFiltered = [];
+        let expandedTasks = new Set();
+        let modalSubtasks = [];
+        let reportKind = 'pdf';
+        let hiddenAt = null;
+        let pinModalMode = 'create';
+        let calYear = new Date().getFullYear();
+        let calMonth = new Date().getMonth();
+        let calSelected = null;
+
+        function defaultSettings() {
+            return {
+                appName: 'TaskFlow Pro', ownerName: '', logo: null, logoW: 0, logoH: 0,
+                categories: DEFAULT_CATEGORIES.map(c => ({ ...c })),
+                lockMinutes: 1, pinHash: null, pinSalt: null,
+                backupDays: 7, lastBackup: null, snoozeUntil: null,
+                dailySummary: true, notifyEnabled: false
+            };
+        }
+
+        function loadSettings() {
+            try {
+                const raw = JSON.parse(localStorage.getItem(SETTINGS_KEY) || 'null');
+                settings = Object.assign(defaultSettings(), raw || {});
+            } catch (e) { settings = defaultSettings(); }
+            if (!Array.isArray(settings.categories) || !settings.categories.length) settings.categories = DEFAULT_CATEGORIES.map(c => ({ ...c }));
+            if (!settings.categories.some(c => c.name === 'General')) settings.categories.unshift({ name: 'General', color: '#64748b' });
+            if (!settings.lastBackup) { settings.lastBackup = todayISO(); saveSettings(); }
+        }
+
+        function saveSettings() { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); }
+
+        function esc(v) {
+            return String(v ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+        }
+
+        function normalizeTask(t) {
+            return {
+                ...t,
+                category: t.category || 'General',
+                assignee: t.assignee || '',
+                notes: t.notes || '',
+                subtasks: Array.isArray(t.subtasks) ? t.subtasks : [],
+                repeat: t.repeat || 'none',
+                repeatSpawned: !!t.repeatSpawned
+            };
+        }
+
+        function loadTasks() {
+            const saved = localStorage.getItem('taskflow_tasks_v2');
+            if (saved) {
+                try { tasks = JSON.parse(saved); } catch (e) { tasks = [...DEFAULT_TASKS]; }
+            } else {
+                tasks = [...DEFAULT_TASKS];
+            }
+            tasks = tasks.map(normalizeTask);
+            tasks.forEach(t => ensureCategory(t.category));
+            if (!saved) saveTasksToStorage();
+
+            try { trash = JSON.parse(localStorage.getItem(TRASH_KEY) || '[]'); } catch (e) { trash = []; }
+            const limit = Date.now() - 30 * 24 * 3600 * 1000;
+            const before = trash.length;
+            trash = trash.filter(t => !t.deletedAt || new Date(t.deletedAt).getTime() > limit).map(normalizeTask);
+            if (trash.length !== before) saveTrash();
+        }
+
+        function saveTrash() { localStorage.setItem(TRASH_KEY, JSON.stringify(trash)); updateTrashBadge(); }
+
+        function nextTaskId() {
+            const all = [...tasks, ...trash];
+            return all.length ? Math.max(...all.map(t => t.id)) + 1 : 1;
+        }
+
+        function addDaysISO(iso, n) {
+            const [y, m, d] = iso.split('-').map(Number);
+            const dt = new Date(Date.UTC(y, m - 1, d + n));
+            return dt.toISOString().slice(0, 10);
+        }
+
+        function addMonthsISO(iso, n) {
+            const [y, m, d] = iso.split('-').map(Number);
+            const total = (m - 1) + n;
+            const ny = y + Math.floor(total / 12), nm = ((total % 12) + 12) % 12;
+            const last = new Date(Date.UTC(ny, nm + 1, 0)).getUTCDate();
+            return new Date(Date.UTC(ny, nm, Math.min(d, last))).toISOString().slice(0, 10);
+        }
+
+        function daysBetween(a, b) {
+            return Math.round((new Date(b + 'T00:00:00Z') - new Date(a + 'T00:00:00Z')) / 86400000);
+        }
+
+        function showToast(msg) {
+            let box = document.getElementById('toastBox');
+            if (!box) {
+                box = document.createElement('div');
+                box.id = 'toastBox';
+                box.className = 'fixed bottom-5 left-1/2 -translate-x-1/2 z-[120] flex flex-col gap-2 items-center pointer-events-none no-print';
+                document.body.appendChild(box);
+            }
+            const el = document.createElement('div');
+            el.className = 'bg-slate-900 text-white text-xs px-4 py-2.5 rounded-xl shadow-lg max-w-[90vw] text-center';
+            el.textContent = msg;
+            box.appendChild(el);
+            setTimeout(() => el.remove(), 3200);
+        }
+
+        // ===================== Nombre de la app, logo y datos del reporte =====================
+        function applyAppName() {
+            const name = settings.appName || 'TaskFlow Pro';
+            document.querySelectorAll('.app-name').forEach(el => { el.textContent = name; });
+            document.title = name + ' - Control de Tareas';
+            const meta = document.querySelector('meta[name="apple-mobile-web-app-title"]');
+            if (meta) meta.setAttribute('content', name.slice(0, 20));
+        }
+
+        function saveAppIdentity() {
+            const name = document.getElementById('appNameInput').value.trim().slice(0, 40);
+            settings.appName = name || 'TaskFlow Pro';
+            settings.ownerName = document.getElementById('ownerNameInput').value.trim().slice(0, 60);
+            saveSettings();
+            applyAppName();
+            renderSettingsUI();
+            const pd = document.getElementById('printDate');
+            if (pd) pd.innerText = new Date().toLocaleDateString('es-ES') + (settings.ownerName ? ' - Preparado por ' + settings.ownerName : '');
+            showToast('Nombre guardado');
+        }
+
+        function handleLogoUpload(ev) {
+            const file = ev.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = () => {
+                const img = new Image();
+                img.onload = () => {
+                    const r = Math.min(300 / img.width, 120 / img.height, 1);
+                    const w = Math.max(1, Math.round(img.width * r)), h = Math.max(1, Math.round(img.height * r));
+                    const c = document.createElement('canvas');
+                    c.width = w; c.height = h;
+                    c.getContext('2d').drawImage(img, 0, 0, w, h);
+                    settings.logo = c.toDataURL('image/png');
+                    settings.logoW = w; settings.logoH = h;
+                    saveSettings();
+                    renderSettingsUI();
+                    showToast('Logo guardado');
+                };
+                img.onerror = () => alert('No se pudo leer la imagen.');
+                img.src = reader.result;
+            };
+            reader.readAsDataURL(file);
+            ev.target.value = '';
+        }
+
+        function removeLogo() {
+            settings.logo = null; settings.logoW = 0; settings.logoH = 0;
+            saveSettings();
+            renderSettingsUI();
+        }
+
+        // ===================== Categorías =====================
+        function ensureCategory(name) {
+            name = (name || 'General').trim() || 'General';
+            if (!settings.categories.some(c => c.name === name)) {
+                settings.categories.push({ name, color: CAT_COLORS[settings.categories.length % CAT_COLORS.length] });
+                saveSettings();
+            }
+            return name;
+        }
+
+        function catColor(name) {
+            const c = settings.categories.find(x => x.name === name);
+            return c ? c.color : '#64748b';
+        }
+
+        function catChip(name) {
+            const c = catColor(name);
+            return `<span class="text-[10px] px-1.5 py-0.5 rounded font-medium" style="background:${c}26;color:${c}">${esc(name)}</span>`;
+        }
+
+        function uniqueAssignees() {
+            return Array.from(new Set(tasks.map(t => (t.assignee || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'es'));
+        }
+
+        function renderCategoryOptions() {
+            const names = settings.categories.map(c => c.name);
+
+            const filterCat = document.getElementById('filterCategory');
+            const prevF = filterCat.value;
+            filterCat.innerHTML = `<option value="ALL">Todas las Categorías</option>` + names.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+            filterCat.value = names.includes(prevF) ? prevF : 'ALL';
+
+            const taskCat = document.getElementById('taskCategory');
+            const prevT = taskCat.value;
+            taskCat.innerHTML = names.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+            taskCat.value = names.includes(prevT) ? prevT : 'General';
+
+            const people = uniqueAssignees();
+            const filterAs = document.getElementById('filterAssignee');
+            const prevA = filterAs.value;
+            filterAs.innerHTML = `<option value="ALL">Todos los Responsables</option><option value="__NONE__">Sin asignar</option>` + people.map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join('');
+            filterAs.value = (prevA === '__NONE__' || people.includes(prevA)) ? prevA : 'ALL';
+            document.getElementById('assigneeSuggestions').innerHTML = people.map(p => `<option value="${esc(p)}">`).join('');
+
+            renderCategoryManager();
+        }
+
+        function renderCategoryManager() {
+            const box = document.getElementById('categoryManager');
+            if (!box) return;
+            const counts = {};
+            tasks.forEach(t => { counts[t.category] = (counts[t.category] || 0) + 1; });
+            box.innerHTML = settings.categories.map((c, i) => `
+                <div class="flex items-center gap-2 p-2 bg-slate-50 dark:bg-slate-900 rounded-xl">
+                    <input type="color" value="${c.color}" onchange="recolorCategory(${i}, this.value)" class="w-8 h-8 rounded-lg border-0 bg-transparent cursor-pointer shrink-0" title="Cambiar color">
+                    <span class="flex-1 min-w-0 truncate text-sm font-medium">${esc(c.name)}</span>
+                    <span class="text-[10px] text-slate-400">${counts[c.name] || 0} tarea(s)</span>
+                    ${c.name === 'General' ? '<span class="w-16"></span>' : `
+                    <button onclick="renameCategory(${i})" title="Renombrar" class="p-1.5 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg text-slate-500"><i class="fa-solid fa-pen"></i></button>
+                    <button onclick="deleteCategory(${i})" title="Eliminar" class="p-1.5 hover:bg-rose-100 dark:hover:bg-rose-900/40 rounded-lg text-rose-500"><i class="fa-solid fa-trash-can"></i></button>`}
+                </div>`).join('');
+        }
+
+        function addCategory() {
+            const input = document.getElementById('newCategoryName');
+            const name = input.value.trim().slice(0, 30);
+            if (!name) return;
+            if (settings.categories.some(c => c.name.toLowerCase() === name.toLowerCase())) { alert('Esa categoría ya existe.'); return; }
+            settings.categories.push({ name, color: document.getElementById('newCategoryColor').value });
+            saveSettings();
+            input.value = '';
+            renderCategoryOptions();
+        }
+
+        function addCategoryFromModal() {
+            const name = (prompt('Nombre de la nueva categoría:') || '').trim().slice(0, 30);
+            if (!name) return;
+            const existing = settings.categories.find(c => c.name.toLowerCase() === name.toLowerCase());
+            const finalName = existing ? existing.name : ensureCategory(name);
+            renderCategoryOptions();
+            document.getElementById('taskCategory').value = finalName;
+        }
+
+        function recolorCategory(i, color) {
+            settings.categories[i].color = color;
+            saveSettings();
+            applyFilters();
+        }
+
+        function renameCategory(i) {
+            const old = settings.categories[i].name;
+            const name = (prompt('Nuevo nombre para "' + old + '":', old) || '').trim().slice(0, 30);
+            if (!name || name === old) return;
+            if (settings.categories.some(c => c.name.toLowerCase() === name.toLowerCase())) { alert('Ya existe una categoría con ese nombre.'); return; }
+            settings.categories[i].name = name;
+            tasks.forEach(t => { if (t.category === old) t.category = name; });
+            trash.forEach(t => { if (t.category === old) t.category = name; });
+            saveSettings(); saveTasksToStorage(); saveTrash();
+            renderCategoryOptions();
+            applyFilters();
+        }
+
+        function deleteCategory(i) {
+            const name = settings.categories[i].name;
+            const n = tasks.filter(t => t.category === name).length;
+            if (!confirm(`¿Eliminar la categoría "${name}"?` + (n ? `\nLas ${n} tarea(s) pasarán a "General".` : ''))) return;
+            tasks.forEach(t => { if (t.category === name) t.category = 'General'; });
+            trash.forEach(t => { if (t.category === name) t.category = 'General'; });
+            settings.categories.splice(i, 1);
+            saveSettings(); saveTasksToStorage(); saveTrash();
+            renderCategoryOptions();
+            applyFilters();
+        }
+
+        // ===================== Navegación =====================
+        function switchTab(tabId) {
+            document.querySelectorAll('main > section').forEach(sec => sec.classList.add('hidden'));
+            document.querySelectorAll('.nav-tab').forEach(tab => {
+                tab.classList.remove('bg-blue-50', 'dark:bg-blue-900/40', 'text-blue-600', 'dark:text-blue-400');
+                tab.classList.add('text-slate-600', 'dark:text-slate-300');
+            });
+            document.getElementById('view-' + tabId).classList.remove('hidden');
+            const activeNav = document.getElementById('tab-' + tabId);
+            activeNav.classList.add('bg-blue-50', 'dark:bg-blue-900/40', 'text-blue-600', 'dark:text-blue-400');
+            activeNav.classList.remove('text-slate-600', 'dark:text-slate-300');
+            if (tabId === 'calendar') renderCalendar();
+            if (tabId === 'settings') renderSettingsUI();
+        }
+
+        // ===================== Filtros, orden y tabla =====================
+        function applyFilters() {
+            const query = document.getElementById('searchInput').value.toLowerCase();
+            const statusFilter = document.getElementById('filterStatus').value;
+            const priorityFilter = document.getElementById('filterPriority').value;
+            const delayFilter = document.getElementById('filterDelay').value;
+            const categoryFilter = document.getElementById('filterCategory').value;
+            const assigneeFilter = document.getElementById('filterAssignee').value;
+            const sortBy = document.getElementById('sortBy').value;
+
+            let filtered = tasks.filter(task => {
+                const hay = (task.title + ' ' + (task.category || '') + ' ' + (task.assignee || '') + ' ' + (task.notes || '')).toLowerCase();
+                const matchesQuery = hay.includes(query);
+                const matchesStatus = statusFilter === 'ALL' || task.status === statusFilter;
+                const matchesPriority = priorityFilter === 'ALL' || task.priority === priorityFilter;
+                const isDelayed = isTaskDelayed(task);
+                const matchesDelay = delayFilter === 'ALL' || (delayFilter === 'Demorado' && isDelayed) || (delayFilter === 'En Plazo' && !isDelayed);
+                const matchesCategory = categoryFilter === 'ALL' || (task.category || 'General') === categoryFilter;
+                const matchesAssignee = assigneeFilter === 'ALL' || (assigneeFilter === '__NONE__' ? !task.assignee : task.assignee === assigneeFilter);
+                return matchesQuery && matchesStatus && matchesPriority && matchesDelay && matchesCategory && matchesAssignee;
+            });
+
+            const cmp = {
+                id: (a, b) => a.id - b.id,
+                end: (a, b) => (a.endDate || '9999').localeCompare(b.endDate || '9999') || a.id - b.id,
+                start: (a, b) => (a.startDate || '9999').localeCompare(b.startDate || '9999') || a.id - b.id,
+                priority: (a, b) => (PRIORITY_ORDER[a.priority] ?? 9) - (PRIORITY_ORDER[b.priority] ?? 9) || a.id - b.id,
+                status: (a, b) => (STATUS_ORDER[a.status] ?? 9) - (STATUS_ORDER[b.status] ?? 9) || a.id - b.id,
+                title: (a, b) => a.title.localeCompare(b.title, 'es')
+            }[sortBy] || ((a, b) => a.id - b.id);
+            filtered = [...filtered].sort(cmp);
+
+            currentFiltered = filtered;
+            renderTaskTable(filtered);
+            updateDashboardMetrics();
+            renderDueAlerts();
+            renderBackupBanner();
+            updateTrashBadge();
+            const cal = document.getElementById('view-calendar');
+            if (cal && !cal.classList.contains('hidden')) renderCalendar();
+        }
+
+        function getFilterDescription() {
+            const parts = [];
+            const q = document.getElementById('searchInput').value.trim();
+            if (q) parts.push('Búsqueda: "' + q + '"');
+            const add = (id, label) => {
+                const el = document.getElementById(id);
+                if (el && el.value !== 'ALL') parts.push(label + ': ' + (el.value === '__NONE__' ? 'Sin asignar' : el.value));
+            };
+            add('filterStatus', 'Estado'); add('filterPriority', 'Prioridad'); add('filterDelay', 'Plazo');
+            add('filterCategory', 'Categoría'); add('filterAssignee', 'Responsable');
+            return parts.join('  |  ');
+        }
+
+        function dueLabel(t) {
+            if (t.status === 'Completado' || !t.endDate) return '';
+            const today = todayISO();
+            if (t.endDate === today) return 'Vence hoy';
+            if (t.endDate === addDaysISO(today, 1)) return 'Vence mañana';
+            return '';
+        }
+
+        function renderTaskTable(taskList) {
+            const tbody = document.getElementById('taskTableBody');
+            const noMsg = document.getElementById('noTasksMsg');
+
+            if (taskList.length === 0) {
+                tbody.innerHTML = '';
+                noMsg.classList.remove('hidden');
+                return;
+            }
+            noMsg.classList.add('hidden');
+
+            tbody.innerHTML = taskList.map(t => {
+                const duration = calculateDurationDays(t.startDate, t.endDate);
+                const delayed = isTaskDelayed(t);
+                const due = dueLabel(t);
+                const subs = t.subtasks || [];
+                const done = subs.filter(s => s.done).length;
+                const hasDetail = subs.length > 0 || (t.notes || '').trim();
+                const expanded = expandedTasks.has(t.id);
+
+                const delayBadge = delayed
+                    ? `<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300"><i class="fa-solid fa-triangle-exclamation"></i> Demorado</span>`
+                    : `<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">En Plazo</span>`;
+                const dueTxt = due ? `<div class="text-[10px] font-semibold text-amber-600 dark:text-amber-400 mt-1">${due}</div>` : '';
+
+                const priorityBadge = t.priority === 'Alta'
+                    ? `<span class="px-2 py-0.5 rounded-md text-xs font-semibold bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300">Alta</span>`
+                    : (t.priority === 'Media'
+                        ? `<span class="px-2 py-0.5 rounded-md text-xs font-semibold bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">Media</span>`
+                        : `<span class="px-2 py-0.5 rounded-md text-xs font-semibold bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">Baja</span>`);
+
+                const statusColor = t.status === 'Completado'
+                    ? 'bg-emerald-500 text-white'
+                    : (t.status === 'En curso' ? 'bg-amber-500 text-white' : 'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300');
+
+                const chipBase = 'text-[10px] bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 px-1.5 py-0.5 rounded';
+                const chips = [
+                    catChip(t.category || 'General'),
+                    t.assignee ? `<span class="${chipBase}"><i class="fa-regular fa-user"></i> ${esc(t.assignee)}</span>` : '',
+                    (t.repeat && t.repeat !== 'none') ? `<span class="${chipBase}"><i class="fa-solid fa-rotate"></i> ${REPEAT_LABELS[t.repeat]}</span>` : '',
+                    subs.length ? `<span class="${chipBase}"><i class="fa-regular fa-square-check"></i> ${done}/${subs.length}</span>` : '',
+                    (t.notes || '').trim() ? `<span class="${chipBase}"><i class="fa-regular fa-note-sticky"></i></span>` : ''
+                ].filter(Boolean).join(' ');
+
+                const titleBlock = `
+                    <div ${hasDetail ? `onclick="toggleExpand(${t.id})" class="cursor-pointer"` : ''}>
+                        <div class="font-medium text-slate-800 dark:text-slate-100 ${t.status === 'Completado' ? 'line-through text-slate-400' : ''}">
+                            ${hasDetail ? `<i class="fa-solid fa-chevron-${expanded ? 'down' : 'right'} text-[10px] text-slate-400 mr-1"></i>` : ''}${esc(t.title)}
+                        </div>
+                        <div class="flex flex-wrap gap-1 mt-1">${chips}</div>
+                    </div>`;
+
+                const mainRow = `
+                    <tr class="hover:bg-slate-50 dark:hover:bg-slate-700/30 transition">
+                        <td class="p-3 text-center font-bold text-slate-400">#${t.id}</td>
+                        <td class="p-3">${titleBlock}</td>
+                        <td class="p-3 text-center">${priorityBadge}</td>
+                        <td class="p-3 text-center text-xs text-slate-500 dark:text-slate-400">
+                            <div>${fmtDate(t.startDate)}</div>
+                            <div class="text-[10px] text-slate-400">hasta ${fmtDate(t.endDate)}</div>
+                        </td>
+                        <td class="p-3 text-center font-medium">${duration} días</td>
+                        <td class="p-3 text-center">
+                            <select onchange="changeTaskStatus(${t.id}, this.value)" class="text-xs px-2.5 py-1 rounded-lg border-0 cursor-pointer ${statusColor} font-medium outline-none">
+                                <option value="No empezado" ${t.status === 'No empezado' ? 'selected' : ''}>No empezado</option>
+                                <option value="En curso" ${t.status === 'En curso' ? 'selected' : ''}>En curso</option>
+                                <option value="Completado" ${t.status === 'Completado' ? 'selected' : ''}>Completado</option>
+                            </select>
+                        </td>
+                        <td class="p-3 text-center">${delayBadge}${dueTxt}</td>
+                        <td class="p-3 text-center no-print">
+                            <div class="flex justify-center items-center gap-1">
+                                <button onclick="openEditTaskModal(${t.id})" title="Editar" class="p-1.5 hover:bg-slate-200 dark:hover:bg-slate-600 rounded-lg text-slate-600 dark:text-slate-300 transition"><i class="fa-solid fa-pen-to-square"></i></button>
+                                <button onclick="deleteTask(${t.id})" title="Mover a la papelera" class="p-1.5 hover:bg-rose-100 dark:hover:bg-rose-900/40 rounded-lg text-rose-600 dark:text-rose-400 transition"><i class="fa-solid fa-trash-can"></i></button>
+                            </div>
+                        </td>
+                    </tr>`;
+
+                let detailRow = '';
+                if (expanded && hasDetail) {
+                    const subHtml = subs.map(s => `
+                        <label class="flex items-center gap-2 py-1 cursor-pointer">
+                            <input type="checkbox" ${s.done ? 'checked' : ''} onchange="toggleSubtask(${t.id}, '${s.id}', this.checked)" class="w-4 h-4 accent-blue-600">
+                            <span class="${s.done ? 'line-through text-slate-400' : ''}">${esc(s.text)}</span>
+                        </label>`).join('');
+                    const pct = subs.length ? Math.round(done / subs.length * 100) : 0;
+                    detailRow = `
+                    <tr class="bg-slate-50/70 dark:bg-slate-900/40">
+                        <td></td>
+                        <td colspan="7" class="p-3 text-xs">
+                            ${subs.length ? `<div class="flex items-center gap-2 mb-1"><div class="flex-1 h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden max-w-xs"><div class="h-full bg-emerald-500" style="width:${pct}%"></div></div><span class="text-slate-500">${done}/${subs.length} (${pct}%)</span></div>${subHtml}` : ''}
+                            ${(t.notes || '').trim() ? `<div class="mt-2 p-2 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 whitespace-pre-wrap text-slate-600 dark:text-slate-300"><i class="fa-regular fa-note-sticky text-slate-400"></i> ${esc(t.notes)}</div>` : ''}
+                        </td>
+                    </tr>`;
+                }
+                return mainRow + detailRow;
+            }).join('');
+        }
+
+        function toggleExpand(id) {
+            if (expandedTasks.has(id)) expandedTasks.delete(id); else expandedTasks.add(id);
+            renderTaskTable(currentFiltered);
+        }
+
+        function toggleSubtask(taskId, subId, checked) {
+            const t = tasks.find(x => x.id === taskId);
+            if (!t) return;
+            const s = t.subtasks.find(x => x.id === subId);
+            if (!s) return;
+            s.done = checked;
+            const allDone = t.subtasks.length > 0 && t.subtasks.every(x => x.done);
+            if (checked && t.status === 'No empezado') t.status = 'En curso';
+            saveTasksToStorage();
+            applyFilters();
+            if (allDone && t.status !== 'Completado' && confirm('Completaste todas las subtareas. ¿Marcar la tarea como Completada?')) {
+                changeTaskStatus(taskId, 'Completado');
+            }
+        }
+
+        // ===================== Alta, edición y borrado de tareas =====================
+        function openNewTaskModal() {
+            document.getElementById('editTaskId').value = '';
+            document.getElementById('modalTitle').innerText = 'Nueva Tarea';
+            document.getElementById('taskForm').reset();
+            renderCategoryOptions();
+            document.getElementById('taskCategory').value = 'General';
+
+            const todayStr = todayISO();
+            setDateValue('taskStartDate', todayStr);
+            setDateValue('taskEndDate', todayStr);
+            modalSubtasks = [];
+            renderSubtaskList();
+            calculateDurationInModal();
+            document.getElementById('taskModal').classList.remove('hidden');
+        }
+
+        function openEditTaskModal(id) {
+            const task = tasks.find(t => t.id === id);
+            if (!task) return;
+            renderCategoryOptions();
+            document.getElementById('editTaskId').value = task.id;
+            document.getElementById('modalTitle').innerText = 'Editar Tarea #' + task.id;
+            document.getElementById('taskTitle').value = task.title;
+            document.getElementById('taskPriority').value = task.priority;
+            document.getElementById('taskCategory').value = ensureCategory(task.category);
+            document.getElementById('taskAssignee').value = task.assignee || '';
+            document.getElementById('taskRepeat').value = task.repeat || 'none';
+            document.getElementById('taskNotes').value = task.notes || '';
+            setDateValue('taskStartDate', task.startDate);
+            setDateValue('taskEndDate', task.endDate);
+            document.getElementById('taskStatus').value = task.status;
+            modalSubtasks = (task.subtasks || []).map(s => ({ ...s }));
+            renderSubtaskList();
+            calculateDurationInModal();
+            document.getElementById('taskModal').classList.remove('hidden');
+        }
+
+        function renderSubtaskList() {
+            const box = document.getElementById('subtaskList');
+            box.innerHTML = modalSubtasks.map((s, i) => `
+                <div class="flex items-center gap-2 p-1.5 bg-slate-50 dark:bg-slate-900 rounded-lg">
+                    <input type="checkbox" ${s.done ? 'checked' : ''} onchange="modalSubtasks[${i}].done = this.checked; renderSubtaskList()" class="w-4 h-4 accent-blue-600">
+                    <span class="flex-1 min-w-0 break-words ${s.done ? 'line-through text-slate-400' : ''}">${esc(s.text)}</span>
+                    <button type="button" onclick="modalSubtasks.splice(${i}, 1); renderSubtaskList()" class="p-1 text-rose-500 hover:bg-rose-100 dark:hover:bg-rose-900/40 rounded"><i class="fa-solid fa-xmark"></i></button>
+                </div>`).join('');
+        }
+
+        function addSubtaskFromInput() {
+            const input = document.getElementById('newSubtaskInput');
+            const text = input.value.trim().slice(0, 120);
+            if (!text) return;
+            modalSubtasks.push({ id: 's' + Date.now().toString(36) + Math.floor(Math.random() * 1000), text, done: false });
+            input.value = '';
+            renderSubtaskList();
+            input.focus();
+        }
+
+        function saveTask(e) {
+            e.preventDefault();
+            const id = document.getElementById('editTaskId').value;
+            const title = document.getElementById('taskTitle').value.trim();
+            const startDate = getDateValue('taskStartDate');
+            const endDate = getDateValue('taskEndDate');
+
+            if (!startDate || !endDate) { alert('Ingresa fechas válidas con formato dd/mm/aaaa.'); return; }
+            if (endDate < startDate) { alert('La fecha final no puede ser anterior a la fecha de inicio.'); return; }
+
+            const data = {
+                title,
+                priority: document.getElementById('taskPriority').value,
+                category: ensureCategory(document.getElementById('taskCategory').value),
+                assignee: document.getElementById('taskAssignee').value.trim().slice(0, 40),
+                repeat: document.getElementById('taskRepeat').value,
+                notes: document.getElementById('taskNotes').value.trim(),
+                startDate, endDate,
+                status: document.getElementById('taskStatus').value,
+                subtasks: modalSubtasks.map(s => ({ id: s.id, text: s.text, done: !!s.done }))
+            };
+
+            if (id) {
+                const index = tasks.findIndex(t => t.id == id);
+                if (index !== -1) {
+                    const prev = tasks[index].status;
+                    tasks[index] = { ...tasks[index], ...data };
+                    if (prev !== 'Completado' && data.status === 'Completado') maybeSpawnRepeat(tasks[index]);
+                }
+            } else {
+                const created = { id: nextTaskId(), repeatSpawned: false, ...data };
+                tasks.push(created);
+                if (created.status === 'Completado') maybeSpawnRepeat(created);
+            }
+
+            saveTasksToStorage();
+            renderCategoryOptions();
+            applyFilters();
+            closeTaskModal();
+        }
+
+        function maybeSpawnRepeat(task) {
+            if (!task.repeat || task.repeat === 'none' || task.repeatSpawned || !task.startDate || !task.endDate) return;
+            const shift = iso => task.repeat === 'daily' ? addDaysISO(iso, 1) : task.repeat === 'weekly' ? addDaysISO(iso, 7) : addMonthsISO(iso, 1);
+            const next = {
+                ...task,
+                id: nextTaskId(),
+                startDate: shift(task.startDate),
+                endDate: shift(task.endDate),
+                status: 'No empezado',
+                repeatSpawned: false,
+                subtasks: (task.subtasks || []).map(s => ({ ...s, done: false }))
+            };
+            tasks.push(next);
+            task.repeatSpawned = true;
+            showToast('Próxima tarea creada para el ' + fmtDate(next.startDate));
+        }
+
+        function changeTaskStatus(id, newStatus) {
+            const task = tasks.find(t => t.id === id);
+            if (!task) return;
+            const prev = task.status;
+            task.status = newStatus;
+            if (prev !== 'Completado' && newStatus === 'Completado') maybeSpawnRepeat(task);
+            saveTasksToStorage();
+            applyFilters();
+        }
+
+        function deleteTask(id) {
+            const task = tasks.find(t => t.id === id);
+            if (!task) return;
+            if (!confirm('¿Mover esta tarea a la papelera? Podrás recuperarla durante 30 días.')) return;
+            trash.push({ ...task, deletedAt: new Date().toISOString() });
+            tasks = tasks.filter(t => t.id !== id);
+            expandedTasks.delete(id);
+            saveTasksToStorage();
+            saveTrash();
+            renderCategoryOptions();
+            applyFilters();
+            showToast('Tarea movida a la papelera');
+        }
+
+        // ===================== Papelera =====================
+        function updateTrashBadge() {
+            document.querySelectorAll('.trash-count').forEach(el => { el.textContent = trash.length; });
+        }
+
+        function openTrashModal() {
+            renderTrashList();
+            document.getElementById('trashModal').classList.remove('hidden');
+        }
+        function closeTrashModal() { document.getElementById('trashModal').classList.add('hidden'); }
+
+        function renderTrashList() {
+            const box = document.getElementById('trashList');
+            if (!trash.length) {
+                box.innerHTML = '<p class="text-center text-slate-400 py-8 text-sm"><i class="fa-regular fa-trash-can text-3xl block mb-2"></i>La papelera está vacía.</p>';
+            } else {
+                box.innerHTML = [...trash].reverse().map(t => {
+                    const left = Math.max(0, 30 - Math.floor((Date.now() - new Date(t.deletedAt).getTime()) / 86400000));
+                    return `
+                    <div class="flex items-center gap-2 p-2.5 bg-slate-50 dark:bg-slate-900 rounded-xl">
+                        <div class="flex-1 min-w-0">
+                            <p class="text-sm font-medium truncate">${esc(t.title)}</p>
+                            <p class="text-[10px] text-slate-400">${esc(t.category)} - se elimina en ${left} día(s)</p>
+                        </div>
+                        <button onclick="restoreFromTrash(${t.id})" class="px-2.5 py-1.5 text-xs font-semibold bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300 rounded-lg">Recuperar</button>
+                        <button onclick="deleteForever(${t.id})" title="Eliminar definitivamente" class="p-1.5 text-rose-500 hover:bg-rose-100 dark:hover:bg-rose-900/40 rounded-lg"><i class="fa-solid fa-xmark"></i></button>
+                    </div>`;
+                }).join('');
+            }
+            updateTrashBadge();
+        }
+
+        function restoreFromTrash(id) {
+            const t = trash.find(x => x.id === id);
+            if (!t) return;
+            const { deletedAt, ...task } = t;
+            if (tasks.some(x => x.id === task.id)) task.id = nextTaskId();
+            ensureCategory(task.category);
+            tasks.push(task);
+            trash = trash.filter(x => x.id !== id);
+            saveTasksToStorage(); saveTrash();
+            renderCategoryOptions(); applyFilters(); renderTrashList();
+            showToast('Tarea recuperada');
+        }
+
+        function deleteForever(id) {
+            if (!confirm('¿Eliminar definitivamente esta tarea? No se puede deshacer.')) return;
+            trash = trash.filter(x => x.id !== id);
+            saveTrash(); renderTrashList();
+        }
+
+        function emptyTrash() {
+            if (!trash.length || !confirm('¿Vaciar la papelera? Se eliminarán ' + trash.length + ' tarea(s) para siempre.')) return;
+            trash = [];
+            saveTrash(); renderTrashList();
+        }
+
+        // ===================== Vencimientos, resumen diario y avisos =====================
+        function getDueAlerts() {
+            const today = todayISO(), tomorrow = addDaysISO(today, 1);
+            const open = tasks.filter(t => t.status !== 'Completado' && t.endDate);
+            return {
+                overdue: open.filter(t => t.endDate < today),
+                today: open.filter(t => t.endDate === today),
+                tomorrow: open.filter(t => t.endDate === tomorrow)
+            };
+        }
+
+        function dueListHtml(alerts) {
+            const block = (title, list, color, icon) => list.length ? `
+                <div class="mb-3">
+                    <p class="text-xs font-bold ${color} mb-1.5"><i class="${icon}"></i> ${title} (${list.length})</p>
+                    <div class="space-y-1">${list.map(t => `
+                        <button onclick="closeDueModal(); switchTab('tasks'); openEditTaskModal(${t.id})" class="w-full text-left flex items-center justify-between gap-2 p-2 rounded-lg bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50">
+                            <span class="text-xs font-medium truncate">${esc(t.title)}${t.assignee ? ` <span class="text-slate-400 font-normal">- ${esc(t.assignee)}</span>` : ''}</span>
+                            <span class="text-[10px] text-slate-400 shrink-0">${fmtDate(t.endDate)}</span>
+                        </button>`).join('')}</div>
+                </div>` : '';
+            return block('Demoradas', alerts.overdue, 'text-rose-600 dark:text-rose-400', 'fa-solid fa-triangle-exclamation')
+                + block('Vencen hoy', alerts.today, 'text-amber-600 dark:text-amber-400', 'fa-solid fa-bell')
+                + block('Vencen mañana', alerts.tomorrow, 'text-blue-600 dark:text-blue-400', 'fa-regular fa-clock');
+        }
+
+        function renderDueAlerts() {
+            const card = document.getElementById('dueAlertsCard');
+            if (!card) return;
+            const a = getDueAlerts();
+            const total = a.overdue.length + a.today.length + a.tomorrow.length;
+            if (!total) { card.classList.add('hidden'); return; }
+            card.classList.remove('hidden');
+            card.innerHTML = `<h3 class="font-semibold text-sm mb-3 flex items-center gap-2"><i class="fa-solid fa-bell text-amber-500"></i> Atención: vencimientos</h3>` + dueListHtml(a);
+        }
+
+        function showDailySummaryIfNeeded() {
+            if (!settings.dailySummary) return;
+            const day = todayISO();
+            if (localStorage.getItem('taskflow_summary_day') === day) return;
+            const a = getDueAlerts();
+            if (!(a.overdue.length + a.today.length + a.tomorrow.length)) return;
+            localStorage.setItem('taskflow_summary_day', day);
+            document.getElementById('dueModalBody').innerHTML = dueListHtml(a);
+            document.getElementById('dueModal').classList.remove('hidden');
+        }
+        function closeDueModal() { document.getElementById('dueModal').classList.add('hidden'); }
+
+        async function enableNotifications() {
+            if (!('Notification' in window)) { alert('Este navegador no admite notificaciones.'); return; }
+            if (settings.notifyEnabled) { settings.notifyEnabled = false; saveSettings(); renderSettingsUI(); return; }
+            const perm = await Notification.requestPermission();
+            settings.notifyEnabled = perm === 'granted';
+            if (perm !== 'granted') alert('Permiso denegado. Puedes habilitarlo desde los ajustes del navegador.');
+            saveSettings();
+            renderSettingsUI();
+            if (settings.notifyEnabled) { localStorage.removeItem('taskflow_notify_day'); maybeNotify(); }
+        }
+
+        async function maybeNotify() {
+            if (!settings.notifyEnabled || !('Notification' in window) || Notification.permission !== 'granted') return;
+            const day = todayISO();
+            if (localStorage.getItem('taskflow_notify_day') === day) return;
+            const a = getDueAlerts();
+            const parts = [];
+            if (a.overdue.length) parts.push(`${a.overdue.length} demorada(s)`);
+            if (a.today.length) parts.push(`${a.today.length} vence(n) hoy`);
+            if (a.tomorrow.length) parts.push(`${a.tomorrow.length} vence(n) mañana`);
+            if (!parts.length) return;
+            localStorage.setItem('taskflow_notify_day', day);
+            const opts = { body: parts.join(' - '), icon: './icons/icon-192.png', badge: './icons/favicon-48.png', tag: 'taskflow-due' };
+            try {
+                const reg = await navigator.serviceWorker.ready;
+                reg.showNotification(settings.appName, opts);
+            } catch (e) { try { new Notification(settings.appName, opts); } catch (e2) {} }
+        }
+
+        // ===================== Copias de seguridad =====================
+        function renderBackupBanner() {
+            const el = document.getElementById('backupBanner');
+            if (!el) return;
+            const today = todayISO();
+            const days = settings.lastBackup ? daysBetween(settings.lastBackup, today) : 999;
+            const snoozed = settings.snoozeUntil && settings.snoozeUntil > today;
+            if (!settings.backupDays || !tasks.length || days < settings.backupDays || snoozed) { el.classList.add('hidden'); return; }
+            el.classList.remove('hidden');
+            document.getElementById('backupBannerText').textContent = `Hace ${days} día(s) que no haces una copia de seguridad.`;
+        }
+        function snoozeBackup() {
+            settings.snoozeUntil = addDaysISO(todayISO(), 1);
+            saveSettings();
+            renderBackupBanner();
+        }
+
         function exportBackupJSON() {
-            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(tasks, null, 2));
-            const downloadAnchor = document.createElement('a');
-            downloadAnchor.setAttribute("href", dataStr);
-            downloadAnchor.setAttribute("download", `taskflow_backup_${new Date().toISOString().slice(0,10)}.json`);
-            document.body.appendChild(downloadAnchor);
-            downloadAnchor.click();
-            downloadAnchor.remove();
+            const payload = {
+                app: 'taskflow', version: 3, exportedAt: new Date().toISOString(),
+                tasks, trash,
+                settings: {
+                    appName: settings.appName, ownerName: settings.ownerName, logo: settings.logo, logoW: settings.logoW, logoH: settings.logoH,
+                    categories: settings.categories, lockMinutes: settings.lockMinutes, backupDays: settings.backupDays, dailySummary: settings.dailySummary
+                }
+            };
+            downloadBlob(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }), `${(settings.appName || 'taskflow').replace(/[^\w-]+/g, '_')}_backup_${todayISO()}.json`);
+            settings.lastBackup = todayISO();
+            settings.snoozeUntil = null;
+            saveSettings();
+            renderBackupBanner();
+            showToast('Copia de seguridad descargada');
         }
 
         function importBackupJSON(event) {
             const file = event.target.files[0];
             if (!file) return;
-
             const reader = new FileReader();
-            reader.onload = function(e) {
+            reader.onload = function (e) {
                 try {
-                    const imported = JSON.parse(e.target.result);
-                    if (Array.isArray(imported)) {
-                        tasks = imported;
-                        saveTasksToStorage();
-                        renderCategoryOptions();
-                        applyFilters();
-                        alert('¡Copia de seguridad restaurada con éxito!');
-                    } else {
-                        alert('El archivo no contiene un formato de lista válido.');
+                    const data = JSON.parse(e.target.result);
+                    const list = Array.isArray(data) ? data : (Array.isArray(data.tasks) ? data.tasks : null);
+                    if (!list) { alert('El archivo no contiene un formato de lista válido.'); return; }
+                    if (!confirm('Se reemplazarán las tareas actuales por las del archivo. ¿Continuar?')) return;
+                    tasks = list.map(normalizeTask);
+                    if (!Array.isArray(data) && Array.isArray(data.trash)) { trash = data.trash.map(normalizeTask); saveTrash(); }
+                    if (!Array.isArray(data) && data.settings) {
+                        const s = data.settings;
+                        if (s.appName) settings.appName = s.appName;
+                        if (typeof s.ownerName === 'string') settings.ownerName = s.ownerName;
+                        if (s.logo) { settings.logo = s.logo; settings.logoW = s.logoW; settings.logoH = s.logoH; }
+                        if (Array.isArray(s.categories) && s.categories.length) settings.categories = s.categories;
+                        if (s.lockMinutes !== undefined) settings.lockMinutes = s.lockMinutes;
+                        if (s.backupDays !== undefined) settings.backupDays = s.backupDays;
+                        if (s.dailySummary !== undefined) settings.dailySummary = s.dailySummary;
                     }
-                } catch(err) {
+                    if (!settings.categories.some(c => c.name === 'General')) settings.categories.unshift({ name: 'General', color: '#64748b' });
+                    tasks.forEach(t => ensureCategory(t.category));
+                    saveSettings(); saveTasksToStorage();
+                    applyAppName(); renderCategoryOptions(); renderSettingsUI(); applyFilters();
+                    alert('¡Copia de seguridad restaurada con éxito!');
+                } catch (err) {
                     alert('Error al leer el archivo JSON.');
                 }
             };
             reader.readAsText(file);
+            event.target.value = '';
         }
 
         function resetDataToDefault() {
             if (confirm('¿Deseas restablecer todas las tareas a los datos de la plantilla inicial?')) {
-                tasks = [...DEFAULT_TASKS];
+                tasks = DEFAULT_TASKS.map(normalizeTask);
                 saveTasksToStorage();
                 renderCategoryOptions();
                 applyFilters();
             }
         }
 
-        function exportToCSV() {
-            let csv = 'ID,Tarea,Prioridad,Categoria,Fecha Inicio,Fecha Final,Duracion (dias),Estado,Demorado\n';
-            tasks.forEach(t => {
-                const duration = calculateDurationDays(t.startDate, t.endDate);
-                const delay = getDelayStatusText(t);
-                csv += `"${t.id}","${t.title.replace(/"/g, '""')}","${t.priority}","${t.category || ''}","${t.startDate}","${t.endDate}","${duration}","${t.status}","${delay}"\n`;
-            });
-
-            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-            const link = document.createElement("a");
-            link.href = URL.createObjectURL(blob);
-            link.setAttribute("download", `Control_de_tareas_${new Date().toISOString().slice(0,10)}.csv`);
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
+        // ===================== PIN de seguridad =====================
+        async function hashPin(pin, salt) {
+            const text = salt + ':' + pin;
+            if (window.crypto && crypto.subtle) {
+                const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+                return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+            }
+            let h = 5381;
+            for (let i = 0; i < text.length; i++) h = ((h << 5) + h + text.charCodeAt(i)) >>> 0;
+            return 'x' + h.toString(16);
         }
 
-        async function generatePDFReport() {
-            if (window.jspdf) {
-                const { jsPDF } = window.jspdf;
-                const doc = new jsPDF();
+        function lockApp() {
+            document.documentElement.classList.add('locked');
+            const inp = document.getElementById('unlockPin');
+            if (inp) { inp.value = ''; setTimeout(() => inp.focus(), 50); }
+            document.getElementById('unlockError').textContent = '';
+        }
 
-                doc.setFontSize(18);
-                doc.text("Reporte de Control de Tareas - TaskFlow Pro", 14, 20);
-                doc.setFontSize(10);
-                doc.text(`Fecha: ${new Date().toLocaleDateString('es-ES')}`, 14, 28);
-                doc.text(`Total Tareas: ${tasks.length} | Completadas: ${tasks.filter(t=>t.status==='Completado').length}`, 14, 34);
-
-                let y = 45;
-                doc.setFontSize(9);
-                tasks.forEach((t, i) => {
-                    if (y > 270) {
-                        doc.addPage();
-                        y = 20;
-                    }
-                    const delayed = isTaskDelayed(t) ? " (DEMORADO)" : "";
-                    doc.text(`${i+1}. [${t.priority}] ${t.title} - ${t.status}${delayed}`, 14, y);
-                    doc.text(`   Inicio: ${t.startDate} | Fin: ${t.endDate} | Cat: ${t.category || 'General'}`, 14, y + 5);
-                    y += 12;
-                });
-
-                doc.save(`Reporte_Tareas_${new Date().toISOString().slice(0,10)}.pdf`);
+        async function submitUnlock(e) {
+            e.preventDefault();
+            const until = Number(localStorage.getItem('taskflow_lock_until') || 0);
+            const err = document.getElementById('unlockError');
+            if (Date.now() < until) { err.textContent = `Demasiados intentos. Espera ${Math.ceil((until - Date.now()) / 1000)} s.`; return; }
+            const pin = document.getElementById('unlockPin').value;
+            const hash = await hashPin(pin, settings.pinSalt || '');
+            if (hash === settings.pinHash) {
+                localStorage.removeItem('taskflow_lock_fails');
+                document.documentElement.classList.remove('locked');
+                document.getElementById('unlockPin').value = '';
+                postUnlock();
             } else {
-                window.print();
+                const fails = Number(localStorage.getItem('taskflow_lock_fails') || 0) + 1;
+                localStorage.setItem('taskflow_lock_fails', fails);
+                if (fails >= 5) {
+                    localStorage.setItem('taskflow_lock_until', Date.now() + 30000);
+                    localStorage.setItem('taskflow_lock_fails', 0);
+                    err.textContent = 'Demasiados intentos. Espera 30 segundos.';
+                } else {
+                    err.textContent = `PIN incorrecto (${fails}/5)`;
+                }
+                document.getElementById('unlockPin').value = '';
             }
         }
 
+        function forgotPin() {
+            if (!confirm('Si olvidaste el PIN, la única forma de entrar es BORRAR todos los datos de esta app en este dispositivo (tareas, papelera y ajustes).\n\n¿Quieres borrarlos?')) return;
+            if (!confirm('Última confirmación: se perderá todo lo que no tengas respaldado. ¿Borrar?')) return;
+            Object.keys(localStorage).filter(k => k.startsWith('taskflow')).forEach(k => localStorage.removeItem(k));
+            location.reload();
+        }
+
+        function openPinModal(mode) {
+            pinModalMode = mode;
+            const titles = { create: 'Crear PIN', change: 'Cambiar PIN', remove: 'Quitar PIN' };
+            document.getElementById('pinModalTitle').textContent = titles[mode];
+            document.getElementById('pinCurrentWrap').classList.toggle('hidden', mode === 'create');
+            document.getElementById('pinNewWrap').classList.toggle('hidden', mode === 'remove');
+            ['pinCurrent', 'pinNew', 'pinConfirm'].forEach(id => { document.getElementById(id).value = ''; });
+            document.getElementById('pinModalError').textContent = '';
+            document.getElementById('pinModal').classList.remove('hidden');
+            setTimeout(() => document.getElementById(mode === 'create' ? 'pinNew' : 'pinCurrent').focus(), 50);
+        }
+        function closePinModal() { document.getElementById('pinModal').classList.add('hidden'); }
+
+        async function submitPinModal(e) {
+            e.preventDefault();
+            const err = document.getElementById('pinModalError');
+            err.textContent = '';
+            if (pinModalMode !== 'create') {
+                const h = await hashPin(document.getElementById('pinCurrent').value, settings.pinSalt || '');
+                if (h !== settings.pinHash) { err.textContent = 'El PIN actual no es correcto.'; return; }
+            }
+            if (pinModalMode === 'remove') {
+                settings.pinHash = null; settings.pinSalt = null;
+                saveSettings(); closePinModal(); renderSettingsUI(); showToast('PIN eliminado');
+                return;
+            }
+            const np = document.getElementById('pinNew').value, cp = document.getElementById('pinConfirm').value;
+            if (!/^\d{4,6}$/.test(np)) { err.textContent = 'El PIN debe tener de 4 a 6 números.'; return; }
+            if (np !== cp) { err.textContent = 'La confirmación no coincide.'; return; }
+            settings.pinSalt = Math.random().toString(36).slice(2) + Date.now().toString(36);
+            settings.pinHash = await hashPin(np, settings.pinSalt);
+            saveSettings(); closePinModal(); renderSettingsUI();
+            showToast(pinModalMode === 'create' ? 'PIN activado' : 'PIN actualizado');
+        }
+
+        function initLockEvents() {
+            document.addEventListener('visibilitychange', () => {
+                if (document.hidden) { hiddenAt = Date.now(); return; }
+                if (settings.pinHash && hiddenAt !== null && settings.lockMinutes >= 0 && !document.documentElement.classList.contains('locked')) {
+                    if (Date.now() - hiddenAt >= settings.lockMinutes * 60000) lockApp();
+                }
+                hiddenAt = null;
+                if (!document.documentElement.classList.contains('locked')) { maybeNotify(); renderBackupBanner(); renderDueAlerts(); }
+            });
+        }
+
+        function postUnlock() {
+            showDailySummaryIfNeeded();
+            maybeNotify();
+            renderBackupBanner();
+        }
+
+        // ===================== Calendario =====================
+        function renderCalendar() {
+            const grid = document.getElementById('calendarGrid');
+            if (!grid) return;
+            const first = new Date(calYear, calMonth, 1);
+            const title = first.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
+            document.getElementById('calTitle').textContent = title.charAt(0).toUpperCase() + title.slice(1);
+            const startOffset = (first.getDay() + 6) % 7;
+            const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+            const today = todayISO();
+            const pad = n => String(n).padStart(2, '0');
+            const prioColor = { Alta: '#ef4444', Media: '#f59e0b', Baja: '#3b82f6' };
+
+            let html = '';
+            for (let i = 0; i < startOffset; i++) html += '<div></div>';
+            for (let d = 1; d <= daysInMonth; d++) {
+                const iso = `${calYear}-${pad(calMonth + 1)}-${pad(d)}`;
+                const active = tasks.filter(t => t.startDate && t.endDate && t.startDate <= iso && iso <= t.endDate);
+                const dots = active.slice(0, 3).map(t => `<span class="w-1.5 h-1.5 rounded-full" style="background:${t.status === 'Completado' ? '#10b981' : prioColor[t.priority] || '#64748b'}"></span>`).join('');
+                const more = active.length > 3 ? `<span class="text-[9px] text-slate-400">+${active.length - 3}</span>` : '';
+                const isToday = iso === today, isSel = iso === calSelected;
+                html += `<button onclick="selectCalDay('${iso}')" class="min-h-[52px] p-1 rounded-xl border text-xs flex flex-col items-center gap-1 transition ${isSel ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30' : 'border-slate-100 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/40'}">
+                    <span class="w-6 h-6 flex items-center justify-center rounded-full font-semibold ${isToday ? 'bg-blue-600 text-white' : ''}">${d}</span>
+                    <span class="flex items-center gap-0.5 flex-wrap justify-center">${dots}${more}</span></button>`;
+            }
+            grid.innerHTML = html;
+            renderCalDayList();
+        }
+
+        function renderCalDayList() {
+            const box = document.getElementById('calDayList');
+            if (!calSelected) { box.innerHTML = '<p class="text-xs text-slate-400 text-center py-4">Toca un día para ver sus tareas.</p>'; return; }
+            const list = tasks.filter(t => t.startDate <= calSelected && calSelected <= t.endDate)
+                .sort((a, b) => (PRIORITY_ORDER[a.priority] ?? 9) - (PRIORITY_ORDER[b.priority] ?? 9));
+            const head = `<h4 class="font-semibold text-sm mb-2">${fmtDate(calSelected)} - ${list.length} tarea(s)</h4>`;
+            if (!list.length) { box.innerHTML = head + '<p class="text-xs text-slate-400 py-2">Sin tareas este día.</p>'; return; }
+            box.innerHTML = head + list.map(t => `
+                <button onclick="openEditTaskModal(${t.id})" class="w-full text-left flex items-center justify-between gap-2 p-2.5 mb-1.5 rounded-xl bg-slate-50 dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-700/50">
+                    <span class="min-w-0">
+                        <span class="block text-sm font-medium truncate ${t.status === 'Completado' ? 'line-through text-slate-400' : ''}">${esc(t.title)}</span>
+                        <span class="text-[10px] text-slate-400">${esc(t.category)}${t.assignee ? ' - ' + esc(t.assignee) : ''}${t.endDate === calSelected ? ' - vence este día' : ''}</span>
+                    </span>
+                    <span class="text-[10px] font-semibold px-2 py-0.5 rounded-md shrink-0 ${t.priority === 'Alta' ? 'bg-red-100 text-red-700' : t.priority === 'Media' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}">${t.priority}</span>
+                </button>`).join('');
+        }
+
+        function selectCalDay(iso) { calSelected = iso; renderCalendar(); }
+        function calNav(delta) {
+            const d = new Date(calYear, calMonth + delta, 1);
+            calYear = d.getFullYear(); calMonth = d.getMonth();
+            renderCalendar();
+        }
+        function calToday() {
+            const d = new Date();
+            calYear = d.getFullYear(); calMonth = d.getMonth(); calSelected = todayISO();
+            renderCalendar();
+        }
+
+        // ===================== Panel de ajustes =====================
+        function renderSettingsUI() {
+            const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+            set('appNameInput', settings.appName);
+            set('ownerNameInput', settings.ownerName);
+            set('lockMinutes', String(settings.lockMinutes));
+            set('backupDays', String(settings.backupDays));
+            const ds = document.getElementById('dailySummaryToggle'); if (ds) ds.checked = !!settings.dailySummary;
+
+            const prev = document.getElementById('logoPreview');
+            if (prev) {
+                prev.innerHTML = settings.logo ? `<img src="${settings.logo}" alt="Logo" class="max-h-14 max-w-[160px] object-contain">` : '<span class="text-xs text-slate-400">Sin logo</span>';
+                document.getElementById('logoRemoveBtn').classList.toggle('hidden', !settings.logo);
+            }
+            const hasPin = !!settings.pinHash;
+            const pinState = document.getElementById('pinState');
+            if (pinState) {
+                pinState.textContent = hasPin ? 'PIN activado' : 'Sin PIN';
+                pinState.className = 'text-xs font-semibold px-2 py-0.5 rounded-full ' + (hasPin ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600');
+                document.getElementById('pinCreateBtn').classList.toggle('hidden', hasPin);
+                document.getElementById('pinChangeBtn').classList.toggle('hidden', !hasPin);
+                document.getElementById('pinRemoveBtn').classList.toggle('hidden', !hasPin);
+                document.getElementById('lockMinutesWrap').classList.toggle('hidden', !hasPin);
+            }
+            const nb = document.getElementById('notifyBtn');
+            if (nb) nb.innerHTML = settings.notifyEnabled
+                ? '<i class="fa-solid fa-bell-slash text-rose-500"></i> Desactivar avisos del sistema'
+                : '<i class="fa-solid fa-bell text-amber-500"></i> Activar avisos del sistema';
+            updateTrashBadge();
+        }
+
+        function updateSetting(key, value) {
+            if (key === 'lockMinutes' || key === 'backupDays') value = Number(value);
+            settings[key] = value;
+            saveSettings();
+            renderBackupBanner();
+        }
+
+        // ===================== Imprimir y compartir =====================
+        function printSummary() {
+            switchTab('tasks');
+            setTimeout(() => window.print(), 150);
+        }
+
         async function shareTaskApp() {
-            const completed = tasks.filter(t => t.status === "Completado").length;
+            const completed = tasks.filter(t => t.status === 'Completado').length;
+            const a = getDueAlerts();
             const shareData = {
-                title: 'TaskFlow Pro - Resumen',
-                text: `Resumen de Tareas: ${completed}/${tasks.length} completadas en TaskFlow Pro!`,
+                title: `${settings.appName} - Resumen`,
+                text: `Resumen de tareas: ${completed}/${tasks.length} completadas. Demoradas: ${a.overdue.length}. Vencen hoy: ${a.today.length}.`,
                 url: window.location.href
             };
-
             if (navigator.share) {
-                try {
-                    await navigator.share(shareData);
-                } catch (err) {}
+                try { await navigator.share(shareData); } catch (err) {}
             } else {
-                const dummy = document.createElement('input');
+                const dummy = document.createElement('textarea');
                 document.body.appendChild(dummy);
                 dummy.value = `${shareData.title}\n${shareData.text}\n${shareData.url}`;
                 dummy.select();
                 document.execCommand('copy');
                 document.body.removeChild(dummy);
                 alert('Resumen copiado al portapapeles.');
+            }
+        }
+
+        // ===================== Opciones de reporte =====================
+        function openReportModal(kind) {
+            reportKind = kind;
+            document.getElementById('reportModalTitle').textContent = kind === 'pdf' ? 'Reporte PDF' : 'Reporte Excel';
+            document.getElementById('reportOrientWrap').classList.toggle('hidden', kind !== 'pdf');
+            document.getElementById('reportFilteredCount').textContent = currentFiltered.length;
+            document.getElementById('reportAllCount').textContent = tasks.length;
+            const desc = getFilterDescription();
+            document.getElementById('reportFilterDesc').textContent = desc ? 'Filtros activos: ' + desc : 'No hay filtros activos.';
+            document.getElementById('reportTitleInput').value = 'Reporte de Control de Tareas';
+            document.getElementById('reportModal').classList.remove('hidden');
+        }
+        function closeReportModal() { document.getElementById('reportModal').classList.add('hidden'); }
+
+        async function runReport(e) {
+            e.preventDefault();
+            const scope = document.querySelector('input[name="reportScope"]:checked').value;
+            const list = scope === 'filtered' ? currentFiltered : [...tasks].sort((a, b) => a.id - b.id);
+            const opts = {
+                title: document.getElementById('reportTitleInput').value.trim() || 'Reporte de Control de Tareas',
+                filterText: scope === 'filtered' ? getFilterDescription() : '',
+                orientation: document.getElementById('reportOrientation').value
+            };
+            closeReportModal();
+            if (!list.length) { alert('No hay tareas para exportar con esa selección.'); return; }
+            if (reportKind === 'pdf') await generatePDFReport(list, opts); else await exportToExcel(list, opts);
+        }
+
+        // ===================== Datos para reportes =====================
+        function getTaskStats(list = tasks) {
+            const total = list.length;
+            const completed = list.filter(t => t.status === 'Completado').length;
+            const inProgress = list.filter(t => t.status === 'En curso').length;
+            const notStarted = list.filter(t => t.status === 'No empezado').length;
+            const delayed = list.filter(t => isTaskDelayed(t)).length;
+            const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
+            const avgDuration = total > 0
+                ? Math.round(list.reduce((a, t) => a + calculateDurationDays(t.startDate, t.endDate), 0) / total * 10) / 10
+                : 0;
+
+            const group = (keyFn, order) => {
+                const map = new Map();
+                list.forEach(t => {
+                    const k = keyFn(t);
+                    if (!map.has(k)) map.set(k, { name: k, total: 0, completed: 0, inProgress: 0, notStarted: 0, delayed: 0 });
+                    const g = map.get(k);
+                    g.total++;
+                    if (t.status === 'Completado') g.completed++;
+                    else if (t.status === 'En curso') g.inProgress++;
+                    else g.notStarted++;
+                    if (isTaskDelayed(t)) g.delayed++;
+                });
+                let arr = [...map.values()];
+                return order
+                    ? order.map(n => arr.find(g => g.name === n)).filter(Boolean)
+                    : arr.sort((a, b) => a.name.localeCompare(b.name, 'es'));
+            };
+
+            return {
+                total, completed, inProgress, notStarted, delayed, percent, avgDuration,
+                byPriority: group(t => t.priority, ['Alta', 'Media', 'Baja']),
+                byCategory: group(t => t.category || 'General'),
+                byAssignee: group(t => t.assignee || 'Sin asignar')
+            };
+        }
+
+        function subtaskText(t) {
+            const n = (t.subtasks || []).length;
+            return n ? `${t.subtasks.filter(s => s.done).length}/${n}` : '-';
+        }
+
+        // ===================== Exportar a Excel (.xlsx con formato A4) =====================
+        async function exportToExcel(list = tasks, opts = {}) {
+            if (!window.ExcelJS) { exportToCSV(list); return; }
+
+            const st = getTaskStats(list);
+            const title = opts.title || 'Reporte de Control de Tareas';
+            const appName = settings.appName || 'TaskFlow Pro';
+            const wb = new ExcelJS.Workbook();
+            wb.creator = appName;
+            wb.created = new Date();
+
+            const thin = { style: 'thin', color: { argb: 'FFCBD5E1' } };
+            const border = { top: thin, left: thin, bottom: thin, right: thin };
+            const BLUE = 'FF1E40AF';
+            const PRIORITY = { 'Alta': ['FFFEE2E2', 'FFB91C1C'], 'Media': ['FFFEF3C7', 'FFB45309'], 'Baja': ['FFDBEAFE', 'FF1D4ED8'] };
+            const STATUS = { 'Completado': ['FFD1FAE5', 'FF047857'], 'En curso': ['FFFEF3C7', 'FFB45309'], 'No empezado': ['FFE2E8F0', 'FF475569'] };
+            const DELAY = { 'Demorado': ['FFFFE4E6', 'FFBE123C'], 'En Plazo': ['FFD1FAE5', 'FF047857'] };
+
+            const fill = argb => ({ type: 'pattern', pattern: 'solid', fgColor: { argb } });
+            const paint = (cell, [bg, fg]) => {
+                cell.fill = fill(bg);
+                cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: fg } };
+            };
+            const banner = (ws, row, lastCol, text, size, height, bg, color, bold = true) => {
+                ws.mergeCells(`A${row}:${lastCol}${row}`);
+                const c = ws.getCell(`A${row}`);
+                c.value = text;
+                c.font = { name: 'Calibri', size, bold, color: { argb: color } };
+                c.fill = fill(bg);
+                c.alignment = { vertical: 'middle', horizontal: 'left', indent: 1, wrapText: true };
+                ws.getRow(row).height = height;
+            };
+            const headerRow = (ws, rowNum, headers) => {
+                const r = ws.getRow(rowNum);
+                headers.forEach((h, i) => {
+                    const c = r.getCell(i + 1);
+                    c.value = h;
+                    c.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+                    c.fill = fill(BLUE);
+                    c.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+                    c.border = border;
+                });
+                r.height = 26;
+            };
+
+            const logoId = settings.logo ? wb.addImage({ base64: settings.logo.split(',')[1], extension: 'png' }) : null;
+            const infoParts = [appName, 'Generado el ' + fmtDate(todayISO())];
+            if (settings.ownerName) infoParts.push('Preparado por: ' + settings.ownerName);
+
+            // ---------- Hoja 1: Tareas (A4 horizontal) ----------
+            const ws = wb.addWorksheet('Tareas', {
+                views: [{ state: 'frozen', ySplit: 4, showGridLines: false }],
+                pageSetup: {
+                    paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0,
+                    horizontalCentered: true,
+                    margins: { left: 0.4, right: 0.4, top: 0.6, bottom: 0.6, header: 0.3, footer: 0.3 }
+                }
+            });
+            ws.pageSetup.printTitlesRow = '4:4';
+            ws.headerFooter.oddFooter = `&L&8${appName.replace(/&/g, '&&')}&C&8Página &P de &N&R&8&D`;
+
+            const widths = [6, 34, 16, 11, 15, 12, 12, 10, 10, 14, 12];
+            ws.columns = widths.map(w => ({ width: w }));
+            const LAST = 'K';
+
+            banner(ws, 1, logoId !== null ? 'J' : LAST, title, 16, 34, BLUE, 'FFFFFFFF');
+            if (logoId !== null) {
+                ws.getCell('K1').fill = fill('FFFFFFFF');
+                let lh = 38, lw = lh * settings.logoW / settings.logoH;
+                if (lw > 80) { lw = 80; lh = lw * settings.logoH / settings.logoW; }
+                ws.addImage(logoId, { tl: { col: 10.05, row: 0.08 }, ext: { width: lw, height: lh } });
+            }
+            banner(ws, 2, LAST,
+                `${infoParts.join('    |    ')}    |    Total: ${st.total}    |    Completadas: ${st.completed}    |    En curso: ${st.inProgress}    |    Demoradas: ${st.delayed}    |    Avance: ${st.percent}%`,
+                10, 24, 'FFEFF6FF', 'FF1E3A8A', false);
+            if (opts.filterText) banner(ws, 3, LAST, 'Filtros: ' + opts.filterText, 9, 18, 'FFFFFBEB', 'FF92400E', false);
+            else ws.getRow(3).height = 6;
+            headerRow(ws, 4, ['ID', 'Tarea', 'Responsable', 'Prioridad', 'Categoría', 'Fecha inicio', 'Fecha final', 'Duración (días)', 'Subtareas', 'Estado', '¿Demorado?']);
+
+            list.forEach((t, idx) => {
+                const row = ws.getRow(5 + idx);
+                const delay = getDelayStatusText(t);
+                const toDate = iso => iso ? new Date(iso + 'T00:00:00Z') : null;
+                [t.id, t.title, t.assignee || '-', t.priority, t.category || 'General', toDate(t.startDate), toDate(t.endDate),
+                    calculateDurationDays(t.startDate, t.endDate), subtaskText(t), t.status, delay
+                ].forEach((v, i) => { row.getCell(i + 1).value = v; });
+
+                const zebra = idx % 2 === 1 ? 'FFF8FAFC' : 'FFFFFFFF';
+                for (let c = 1; c <= 11; c++) {
+                    const cell = row.getCell(c);
+                    cell.border = border;
+                    cell.font = { name: 'Calibri', size: 10, color: { argb: 'FF1E293B' } };
+                    cell.fill = fill(zebra);
+                    cell.alignment = { vertical: 'middle', horizontal: c === 2 ? 'left' : 'center', wrapText: true, indent: c === 2 ? 1 : 0 };
+                }
+                row.getCell(6).numFmt = 'dd/mm/yyyy';
+                row.getCell(7).numFmt = 'dd/mm/yyyy';
+                row.getCell(8).numFmt = '0';
+                row.getCell(1).font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF64748B' } };
+                if (PRIORITY[t.priority]) paint(row.getCell(4), PRIORITY[t.priority]);
+                if (STATUS[t.status]) paint(row.getCell(10), STATUS[t.status]);
+                if (DELAY[delay]) paint(row.getCell(11), DELAY[delay]);
+
+                const lines = Math.max(1, Math.ceil((t.title || '').length / 34));
+                row.height = Math.max(22, lines * 14 + 8);
+            });
+
+            const lastRow = 4 + Math.max(list.length, 1);
+            ws.autoFilter = `A4:${LAST}${lastRow}`;
+            ws.getRow(lastRow + 1).height = 8;
+            banner(ws, lastRow + 2, LAST, `Total de tareas: ${st.total}`, 10, 20, 'FFF1F5F9', 'FF334155', true);
+            ws.pageSetup.printArea = `A1:${LAST}${lastRow + 2}`;
+
+            // ---------- Hoja 2: Resumen (A4 vertical) ----------
+            const rs = wb.addWorksheet('Resumen', {
+                views: [{ showGridLines: false }],
+                pageSetup: {
+                    paperSize: 9, orientation: 'portrait', fitToPage: true, fitToWidth: 1, fitToHeight: 0,
+                    horizontalCentered: true,
+                    margins: { left: 0.5, right: 0.5, top: 0.7, bottom: 0.7, header: 0.3, footer: 0.3 }
+                }
+            });
+            rs.headerFooter.oddFooter = `&L&8${appName.replace(/&/g, '&&')}&C&8Página &P de &N&R&8&D`;
+            rs.columns = [{ width: 26 }, { width: 13 }, { width: 14 }, { width: 13 }, { width: 15 }, { width: 13 }];
+
+            banner(rs, 1, 'F', 'Resumen de Tareas', 16, 32, BLUE, 'FFFFFFFF');
+            banner(rs, 2, 'F', infoParts.join('    |    ') + (opts.filterText ? '    |    Filtros: ' + opts.filterText : ''), 9, opts.filterText ? 34 : 20, 'FFEFF6FF', 'FF1E3A8A', false);
+            rs.getRow(3).height = 8;
+
+            const sectionTitle = (row, text) => {
+                rs.mergeCells(`A${row}:F${row}`);
+                const c = rs.getCell(`A${row}`);
+                c.value = text;
+                c.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FF1E293B' } };
+                c.alignment = { vertical: 'middle' };
+                c.border = { bottom: { style: 'medium', color: { argb: BLUE } } };
+                rs.getRow(row).height = 22;
+            };
+
+            sectionTitle(4, 'Indicadores generales');
+            headerRow(rs, 5, ['Indicador', 'Valor']);
+            const kpis = [
+                ['Total de tareas', st.total, '0'], ['Completadas', st.completed, '0'], ['En curso', st.inProgress, '0'],
+                ['No empezadas', st.notStarted, '0'], ['Demoradas', st.delayed, '0'],
+                ['Avance general', st.total ? st.completed / st.total : 0, '0%'], ['Duración promedio (días)', st.avgDuration, '0.0']
+            ];
+            kpis.forEach((k, i) => {
+                const r = rs.getRow(6 + i);
+                r.getCell(1).value = k[0];
+                r.getCell(2).value = k[1];
+                r.getCell(2).numFmt = k[2];
+                [1, 2].forEach(c => {
+                    const cell = r.getCell(c);
+                    cell.border = border;
+                    cell.font = { name: 'Calibri', size: 10, bold: c === 2, color: { argb: 'FF1E293B' } };
+                    cell.fill = fill(i % 2 ? 'FFF8FAFC' : 'FFFFFFFF');
+                    cell.alignment = { vertical: 'middle', horizontal: c === 1 ? 'left' : 'center', indent: c === 1 ? 1 : 0 };
+                });
+                r.height = 20;
+            });
+
+            const groupTable = (startRow, ttl, firstHeader, groups) => {
+                sectionTitle(startRow, ttl);
+                headerRow(rs, startRow + 1, [firstHeader, 'Total', 'Completadas', 'En curso', 'No empezadas', 'Demoradas']);
+                groups.forEach((g, i) => {
+                    const r = rs.getRow(startRow + 2 + i);
+                    [g.name, g.total, g.completed, g.inProgress, g.notStarted, g.delayed].forEach((v, c) => { r.getCell(c + 1).value = v; });
+                    for (let c = 1; c <= 6; c++) {
+                        const cell = r.getCell(c);
+                        cell.border = border;
+                        cell.font = { name: 'Calibri', size: 10, bold: c === 2, color: { argb: 'FF1E293B' } };
+                        cell.fill = fill(i % 2 ? 'FFF8FAFC' : 'FFFFFFFF');
+                        cell.alignment = { vertical: 'middle', horizontal: c === 1 ? 'left' : 'center', indent: c === 1 ? 1 : 0 };
+                    }
+                    if (g.delayed > 0) paint(r.getCell(6), DELAY['Demorado']);
+                    r.height = 20;
+                });
+                return startRow + 2 + Math.max(groups.length, 1);
+            };
+
+            let next = 6 + kpis.length + 1;
+            next = groupTable(next, 'Por prioridad', 'Prioridad', st.byPriority) + 1;
+            next = groupTable(next, 'Por categoría', 'Categoría', st.byCategory) + 1;
+            next = groupTable(next, 'Por responsable', 'Responsable', st.byAssignee);
+            rs.pageSetup.printArea = `A1:F${next}`;
+
+            try {
+                const buffer = await wb.xlsx.writeBuffer();
+                downloadBlob(new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
+                    `Control_de_tareas_${todayISO()}.xlsx`);
+            } catch (err) {
+                console.error(err);
+                alert('No se pudo generar el Excel. Se descargará un CSV como alternativa.');
+                exportToCSV(list);
+            }
+        }
+
+        // Alternativa si la librería de Excel no está disponible (sin conexión la primera vez)
+        function exportToCSV(list = tasks) {
+            const q = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+            const rows = [['ID', 'Tarea', 'Responsable', 'Prioridad', 'Categoría', 'Fecha inicio', 'Fecha final', 'Duración (días)', 'Subtareas', 'Estado', '¿Demorado?']];
+            list.forEach(t => rows.push([
+                t.id, t.title, t.assignee || '', t.priority, t.category || 'General', fmtDate(t.startDate), fmtDate(t.endDate),
+                calculateDurationDays(t.startDate, t.endDate), subtaskText(t), t.status, getDelayStatusText(t)
+            ]));
+            const csv = '\ufeff' + rows.map(r => r.map(q).join(';')).join('\r\n');
+            downloadBlob(new Blob([csv], { type: 'text/csv;charset=utf-8;' }), `Control_de_tareas_${todayISO()}.csv`);
+        }
+
+        // ===================== Reporte PDF (A4 vertical u horizontal) =====================
+        async function generatePDFReport(list = tasks, opts = {}) {
+            if (!window.jspdf) { window.print(); return; }
+            const { jsPDF } = window.jspdf;
+            const landscape = opts.orientation === 'landscape';
+            const doc = new jsPDF({ orientation: landscape ? 'landscape' : 'portrait', unit: 'mm', format: 'a4' });
+            if (typeof doc.autoTable !== 'function') { window.print(); return; }
+
+            const st = getTaskStats(list);
+            const title = opts.title || 'Reporte de Control de Tareas';
+            const appName = settings.appName || 'TaskFlow Pro';
+            const W = landscape ? 297 : 210, H = landscape ? 210 : 297, M = 12, CW = W - 2 * M;
+            const BLUE = [30, 64, 175], BORDER = [203, 213, 225], INK = [30, 41, 59];
+
+            const PRIORITY = { 'Alta': [[254, 226, 226], [185, 28, 28]], 'Media': [[254, 243, 199], [180, 83, 9]], 'Baja': [[219, 234, 254], [29, 78, 216]] };
+            const STATUS = { 'Completado': [[209, 250, 229], [4, 120, 87]], 'En curso': [[254, 243, 199], [180, 83, 9]], 'No empezado': [[226, 232, 240], [71, 85, 105]] };
+            const DELAY = { 'Demorado': [[255, 228, 230], [190, 18, 60]], 'En Plazo': [[209, 250, 229], [4, 120, 87]] };
+
+            // Encabezado
+            doc.setFillColor(...BLUE);
+            doc.rect(0, 0, W, 24, 'F');
+            let rightEdge = W - M;
+            if (settings.logo) {
+                let lh = 15, lw = lh * settings.logoW / settings.logoH;
+                if (lw > 38) { lw = 38; lh = lw * settings.logoH / settings.logoW; }
+                doc.setFillColor(255, 255, 255);
+                doc.roundedRect(W - M - lw - 4, (24 - lh) / 2 - 2, lw + 4, lh + 4, 1.5, 1.5, 'F');
+                doc.addImage(settings.logo, 'PNG', W - M - lw - 2, (24 - lh) / 2, lw, lh);
+                rightEdge = W - M - lw - 8;
+            }
+            doc.setTextColor(255, 255, 255);
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(16);
+            doc.text(title, M, 11);
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(9);
+            doc.text(appName + (settings.ownerName ? '  |  Preparado por: ' + settings.ownerName : ''), M, 18);
+            doc.text('Generado el ' + fmtDate(todayISO()), rightEdge, 18, { align: 'right' });
+
+            let y0 = 30;
+            if (opts.filterText) {
+                doc.setFont('helvetica', 'italic');
+                doc.setFontSize(8);
+                doc.setTextColor(146, 64, 14);
+                const lines = doc.splitTextToSize('Filtros: ' + opts.filterText, CW);
+                doc.text(lines, M, 29.5);
+                y0 = 29.5 + lines.length * 3.6 + 2;
+            }
+
+            // Indicadores
+            const kpis = [['TOTAL', st.total, [30, 64, 175]], ['COMPLETADAS', st.completed, [4, 120, 87]], ['EN CURSO', st.inProgress, [180, 83, 9]], ['DEMORADAS', st.delayed, [190, 18, 60]]];
+            const gap = 4, bw = (CW - gap * 3) / 4, bh = 17;
+            kpis.forEach((k, i) => {
+                const x = M + i * (bw + gap);
+                doc.setFillColor(248, 250, 252);
+                doc.setDrawColor(...BORDER);
+                doc.setLineWidth(0.25);
+                doc.roundedRect(x, y0, bw, bh, 2, 2, 'FD');
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(7);
+                doc.setTextColor(100, 116, 139);
+                doc.text(k[0], x + bw / 2, y0 + 5.5, { align: 'center' });
+                doc.setFontSize(15);
+                doc.setTextColor(...k[2]);
+                doc.text(String(k[1]), x + bw / 2, y0 + 13.5, { align: 'center' });
+            });
+
+            // Barra de avance
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(8);
+            doc.setTextColor(...INK);
+            doc.text('Avance general', M, y0 + 24);
+            doc.setFont('helvetica', 'bold');
+            doc.text(st.percent + '%', W - M, y0 + 24, { align: 'right' });
+            doc.setFillColor(226, 232, 240);
+            doc.roundedRect(M, y0 + 26, CW, 3, 1.5, 1.5, 'F');
+            if (st.percent > 0) {
+                doc.setFillColor(16, 185, 129);
+                doc.roundedRect(M, y0 + 26, Math.max(3, CW * st.percent / 100), 3, 1.5, 1.5, 'F');
+            }
+
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(10);
+            doc.setTextColor(...INK);
+            doc.text('Detalle de tareas', M, y0 + 36);
+
+            // Columnas (anchos relativos que se ajustan al ancho de la hoja)
+            const cols = [
+                { h: '#', w: 7, a: 'center', v: t => t.id },
+                { h: 'Tarea', w: 38, a: 'left', v: t => t.title },
+                { h: 'Responsable', w: 22, a: 'center', v: t => t.assignee || '-' },
+                { h: 'Categoría', w: 18, a: 'center', v: t => t.category || 'General' },
+                { h: 'Prioridad', w: 17, a: 'center', v: t => t.priority },
+                { h: 'Inicio', w: 18, a: 'center', v: t => fmtDate(t.startDate) },
+                { h: 'Fin', w: 18, a: 'center', v: t => fmtDate(t.endDate) },
+                { h: 'Días', w: 9, a: 'center', v: t => calculateDurationDays(t.startDate, t.endDate) },
+                { h: 'Subt.', w: 11, a: 'center', v: t => subtaskText(t) },
+                { h: 'Estado', w: 22, a: 'center', v: t => t.status },
+                { h: 'Plazo', w: 17, a: 'center', v: t => getDelayStatusText(t) }
+            ];
+            const k = CW / cols.reduce((a, c) => a + c.w, 0);
+            const columnStyles = {};
+            cols.forEach((c, i) => { columnStyles[i] = { cellWidth: c.w * k, halign: c.a }; });
+            columnStyles[0].textColor = [100, 116, 139];
+            columnStyles[0].fontStyle = 'bold';
+            const iPrio = cols.findIndex(c => c.h === 'Prioridad'), iStat = cols.findIndex(c => c.h === 'Estado'), iPlazo = cols.findIndex(c => c.h === 'Plazo');
+
+            const fs = landscape ? 8.5 : 7.5;
+            const tableBase = {
+                theme: 'grid',
+                margin: { left: M, right: M, top: 16, bottom: 18 },
+                styles: { font: 'helvetica', fontSize: fs, cellPadding: 1.6, lineColor: BORDER, lineWidth: 0.2, textColor: INK, valign: 'middle', overflow: 'linebreak' },
+                headStyles: { fillColor: BLUE, textColor: 255, fontStyle: 'bold', halign: 'center', valign: 'middle', fontSize: fs - 0.5 },
+                alternateRowStyles: { fillColor: [248, 250, 252] },
+                rowPageBreak: 'avoid'
+            };
+            const runningHeader = (data) => {
+                if (data.pageNumber > 1) {
+                    doc.setFont('helvetica', 'normal');
+                    doc.setFontSize(8);
+                    doc.setTextColor(100, 116, 139);
+                    doc.text(appName + ' - ' + title, M, 9);
+                    doc.setDrawColor(...BORDER);
+                    doc.setLineWidth(0.3);
+                    doc.line(M, 11.5, W - M, 11.5);
+                }
+            };
+
+            doc.autoTable({
+                ...tableBase,
+                startY: y0 + 38,
+                head: [cols.map(c => c.h)],
+                body: list.map(t => cols.map(c => c.v(t))),
+                columnStyles,
+                didParseCell: (data) => {
+                    if (data.section !== 'body') return;
+                    const i = data.column.index;
+                    const map = i === iPrio ? PRIORITY : i === iStat ? STATUS : i === iPlazo ? DELAY : null;
+                    const colors = map && map[data.cell.raw];
+                    if (colors) {
+                        data.cell.styles.fillColor = colors[0];
+                        data.cell.styles.textColor = colors[1];
+                        data.cell.styles.fontStyle = 'bold';
+                    }
+                },
+                didDrawPage: runningHeader
+            });
+
+            // Resúmenes
+            const summary = (ttl, firstHeader, groups) => {
+                let y = doc.lastAutoTable.finalY + 9;
+                if (y > H - 55) { doc.addPage(); y = 20; }
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(10);
+                doc.setTextColor(...INK);
+                doc.text(ttl, M, y);
+                doc.autoTable({
+                    ...tableBase,
+                    startY: y + 2,
+                    tableWidth: CW,
+                    head: [[firstHeader, 'Total', 'Completadas', 'En curso', 'No empezadas', 'Demoradas']],
+                    body: groups.map(g => [g.name, g.total, g.completed, g.inProgress, g.notStarted, g.delayed]),
+                    columnStyles: { 0: { halign: 'left', cellWidth: CW * 0.30 }, 1: { halign: 'center' }, 2: { halign: 'center' }, 3: { halign: 'center' }, 4: { halign: 'center' }, 5: { halign: 'center' } },
+                    didParseCell: (data) => {
+                        if (data.section === 'body' && data.column.index === 5 && Number(data.cell.raw) > 0) {
+                            data.cell.styles.fillColor = DELAY['Demorado'][0];
+                            data.cell.styles.textColor = DELAY['Demorado'][1];
+                            data.cell.styles.fontStyle = 'bold';
+                        }
+                    },
+                    didDrawPage: runningHeader
+                });
+            };
+            summary('Resumen por categoría', 'Categoría', st.byCategory);
+            if (st.byAssignee.some(g => g.name !== 'Sin asignar')) summary('Resumen por responsable', 'Responsable', st.byAssignee);
+
+            // Pie de página con numeración
+            const pages = doc.getNumberOfPages();
+            for (let i = 1; i <= pages; i++) {
+                doc.setPage(i);
+                doc.setDrawColor(...BORDER);
+                doc.setLineWidth(0.3);
+                doc.line(M, H - 12, W - M, H - 12);
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(8);
+                doc.setTextColor(100, 116, 139);
+                doc.text(appName + ' - Control de Tareas', M, H - 7);
+                doc.text(`Página ${i} de ${pages}`, W - M, H - 7, { align: 'right' });
+            }
+
+            doc.save(`Reporte_Tareas_${todayISO()}.pdf`);
+        }
+
+        // ===================== Inicio de la aplicación =====================
+        function initApp() {
+            try {
+                loadSettings();
+                loadTasks();
+                initTheme();
+                applyAppName();
+                renderCategoryOptions();
+                renderSettingsUI();
+                applyFilters();
+                const printElem = document.getElementById('printDate');
+                if (printElem) printElem.innerText = new Date().toLocaleDateString('es-ES') + (settings.ownerName ? ' - Preparado por ' + settings.ownerName : '');
+                initLockEvents();
+                if (settings.pinHash) lockApp(); else postUnlock();
+            } catch (err) {
+                console.error('Error al inicializar la aplicación:', err);
             }
         }
 
