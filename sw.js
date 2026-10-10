@@ -1,4 +1,4 @@
-const CACHE_NAME = 'taskflow-v2';
+const CACHE_NAME = 'taskflow-v3';
 
 // Archivos propios
 const LOCAL_ASSETS = [
@@ -65,6 +65,17 @@ self.addEventListener('fetch', (event) => {
           if (req.mode === 'navigate') return caches.match('./index.html');
           return Response.error();
         });
+    })
+  );
+});
+
+// Al tocar una notificación, abre o enfoca la app
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
+      for (const c of list) { if ('focus' in c) return c.focus(); }
+      return self.clients.openWindow('./index.html');
     })
   );
 });
