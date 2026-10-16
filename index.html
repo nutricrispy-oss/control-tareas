@@ -456,6 +456,17 @@
             </section>
 
             <section id="view-settings" class="hidden space-y-6">
+                <!-- Instalación y actualización -->
+                <div id="installCard" class="bg-white dark:bg-slate-800 p-5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm space-y-4 no-print">
+                    <h3 class="font-semibold text-slate-800 dark:text-slate-100 text-sm flex items-center gap-2"><i class="fa-solid fa-mobile-screen-button text-blue-500"></i> Instalar la app <span id="installState" class="ml-auto"></span></h3>
+                    <p id="installHelp" class="text-xs text-slate-500 dark:text-slate-400"></p>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <button id="installBtn" onclick="installPwaPrompt()" class="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition"><i class="fa-solid fa-download"></i> Instalar aplicación</button>
+                        <button onclick="checkForUpdate()" class="px-4 py-2.5 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition"><i class="fa-solid fa-rotate text-emerald-500"></i> Buscar actualización</button>
+                    </div>
+                    <p class="text-[11px] text-slate-400">Versión <span id="appVersionText"></span></p>
+                </div>
+
                 <!-- Personalización -->
                 <div class="bg-white dark:bg-slate-800 p-5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm space-y-4 no-print">
                     <h3 class="font-semibold text-slate-800 dark:text-slate-100 text-sm flex items-center gap-2"><i class="fa-solid fa-signature text-blue-500"></i> Nombre y logo de la app</h3>
@@ -796,23 +807,6 @@
 
 
         // Registro de Service Worker para subdirectorios de GitHub Pages
-        function registerServiceWorker() {
-            if ('serviceWorker' in navigator) {
-                // Se usa la ruta relativa './sw.js' y el ámbito './' para permitir su ejecución en cualquier subruta
-                navigator.serviceWorker.register('./sw.js', { scope: './' })
-                    .then((reg) => console.log('Service Worker PWA registrado correctamente en scope:', reg.scope))
-                    .catch((err) => console.warn('Aviso: Registro Service Worker PWA no disponible:', err));
-            }
-
-            window.addEventListener('beforeinstallprompt', (e) => {
-                e.preventDefault();
-                deferredPrompt = e;
-                const banner = document.getElementById('pwaBanner');
-                const btnTop = document.getElementById('pwaInstallBtnTop');
-                if (banner) banner.classList.remove('hidden');
-                if (btnTop) btnTop.classList.remove('hidden');
-            });
-        }
 
 
         function saveTasksToStorage() {
@@ -2122,6 +2116,7 @@
                 ? '<i class="fa-solid fa-bell-slash text-rose-500"></i> Desactivar avisos del sistema'
                 : '<i class="fa-solid fa-bell text-amber-500"></i> Activar avisos del sistema';
             updateTrashBadge();
+            renderInstallCard();
         }
 
         function updateSetting(key, value) {
@@ -2650,16 +2645,101 @@
             }
         }
 
+
+        // ===================== Instalación y actualización de la PWA =====================
+        const APP_VERSION = '4.0';
+        let updateRequested = false;
+
+        function isStandalone() {
+            return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
+        }
+        function isIos() { return /iphone|ipad|ipod/i.test(navigator.userAgent); }
+
+        function renderInstallCard() {
+            const state = document.getElementById('installState');
+            if (!state) return;
+            const btn = document.getElementById('installBtn');
+            const help = document.getElementById('installHelp');
+            document.getElementById('appVersionText').textContent = APP_VERSION;
+            const set = (txt, cls) => { state.textContent = txt; state.className = 'ml-auto text-xs font-semibold px-2 py-0.5 rounded-full ' + cls; };
+
+            if (isStandalone()) {
+                set('Instalada', 'bg-emerald-100 text-emerald-700');
+                help.textContent = 'La app ya está instalada y se está ejecutando como aplicación en este dispositivo.';
+                btn.classList.add('hidden');
+            } else if (deferredPrompt) {
+                set('Lista para instalar', 'bg-blue-100 text-blue-700');
+                help.textContent = 'Instálala para abrirla desde la pantalla de inicio, a pantalla completa y con acceso sin conexión.';
+                btn.classList.remove('hidden');
+            } else if (isIos()) {
+                set('Instalación manual', 'bg-slate-200 text-slate-600');
+                help.textContent = 'En iPhone/iPad abre esta página en Safari, toca el botón Compartir y elige "Añadir a pantalla de inicio".';
+                btn.classList.add('hidden');
+            } else {
+                set('Instalación manual', 'bg-slate-200 text-slate-600');
+                help.textContent = 'Abre el menú del navegador y elige "Instalar aplicación" o "Añadir a pantalla de inicio". Requiere abrir la app desde su enlace https (por ejemplo GitHub Pages).';
+                btn.classList.remove('hidden');
+            }
+        }
+
         function installPwaPrompt() {
             if (deferredPrompt) {
                 deferredPrompt.prompt();
-                deferredPrompt.userChoice.then((choiceResult) => {
-                    if (choiceResult.outcome === 'accepted') dismissPwaBanner();
+                deferredPrompt.userChoice.then((choice) => {
+                    if (choice.outcome === 'accepted') dismissPwaBanner();
                     deferredPrompt = null;
+                    renderInstallCard();
                 });
             } else {
-                alert('Para instalar en GitHub Pages: usa la opción "Añadir a pantalla de inicio" o "Instalar aplicación" desde el menú del navegador.');
+                switchTab('settings');
+                renderInstallCard();
+                const card = document.getElementById('installCard');
+                if (card) card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                showToast('Sigue las indicaciones de instalación manual');
             }
+        }
+
+        async function checkForUpdate() {
+            if (!('serviceWorker' in navigator)) { showToast('Este navegador no admite actualizaciones automáticas'); return; }
+            try {
+                const reg = await navigator.serviceWorker.getRegistration('./');
+                if (!reg) { showToast('Aún no hay una versión instalada para actualizar'); return; }
+                updateRequested = true;
+                showToast('Buscando actualización...');
+                await reg.update();
+                setTimeout(() => { if (updateRequested) { updateRequested = false; showToast('Ya tienes la última versión'); } }, 4000);
+            } catch (e) { showToast('No se pudo comprobar (¿sin conexión?)'); }
+        }
+
+        function registerServiceWorker() {
+            if ('serviceWorker' in navigator) {
+                // Ruta relativa y ámbito "./": cada app queda aislada en su propia carpeta del repositorio
+                navigator.serviceWorker.register('./sw.js', { scope: './' })
+                    .then((reg) => console.log('Service Worker PWA registrado correctamente en scope:', reg.scope))
+                    .catch((err) => console.warn('Aviso: Registro Service Worker PWA no disponible:', err));
+                navigator.serviceWorker.addEventListener('controllerchange', () => {
+                    if (updateRequested) { updateRequested = false; showToast('Actualización instalada, recargando...'); setTimeout(() => location.reload(), 800); }
+                });
+            }
+
+            window.addEventListener('beforeinstallprompt', (e) => {
+                e.preventDefault();
+                deferredPrompt = e;
+                const banner = document.getElementById('pwaBanner');
+                const btnTop = document.getElementById('pwaInstallBtnTop');
+                if (banner) banner.classList.remove('hidden');
+                if (btnTop) btnTop.classList.remove('hidden');
+                renderInstallCard();
+            });
+
+            window.addEventListener('appinstalled', () => {
+                deferredPrompt = null;
+                dismissPwaBanner();
+                const btnTop = document.getElementById('pwaInstallBtnTop');
+                if (btnTop) btnTop.classList.add('hidden');
+                renderInstallCard();
+                showToast('¡App instalada!');
+            });
         }
 
         function dismissPwaBanner() {

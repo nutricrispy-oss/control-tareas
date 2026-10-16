@@ -1,4 +1,6 @@
-const CACHE_NAME = 'taskflow-v3';
+// Prefijo propio: esta app solo toca SUS cachés, nunca las de otras apps del mismo sitio
+const CACHE_PREFIX = 'taskflow-pro-';
+const CACHE_NAME = CACHE_PREFIX + 'v4';
 
 // Archivos propios
 const LOCAL_ASSETS = [
@@ -35,11 +37,11 @@ self.addEventListener('install', (event) => {
   self.skipWaiting();
 });
 
-// Activación: elimina caches antiguas
+// Activación: elimina solo las cachés antiguas de ESTA app
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((names) =>
-      Promise.all(names.filter((n) => n !== CACHE_NAME).map((n) => caches.delete(n)))
+      Promise.all(names.filter((n) => (n.startsWith(CACHE_PREFIX) || /^taskflow-v\d+$/.test(n)) && n !== CACHE_NAME).map((n) => caches.delete(n)))
     )
   );
   self.clients.claim();
@@ -51,7 +53,7 @@ self.addEventListener('fetch', (event) => {
   if (req.method !== 'GET') return;
 
   event.respondWith(
-    caches.match(req).then((cached) => {
+    caches.open(CACHE_NAME).then((c) => c.match(req)).then((cached) => {
       if (cached) return cached;
       return fetch(req)
         .then((res) => {
@@ -62,7 +64,7 @@ self.addEventListener('fetch', (event) => {
           return res;
         })
         .catch(() => {
-          if (req.mode === 'navigate') return caches.match('./index.html');
+          if (req.mode === 'navigate') return caches.open(CACHE_NAME).then((c) => c.match('./index.html'));
           return Response.error();
         });
     })

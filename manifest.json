@@ -1,5 +1,5 @@
 {
-  "id": "./index.html",
+  "id": "taskflow-pro-control-de-tareas",
   "name": "TaskFlow Pro - Control de Tareas",
   "short_name": "TaskFlow",
   "description": "Sistema PWA para gestión y control de tareas y proyectos",
@@ -10,10 +10,28 @@
   "orientation": "any",
   "background_color": "#0f172a",
   "theme_color": "#2563eb",
-  "categories": ["productivity", "business"],
+  "categories": [
+    "productivity",
+    "business"
+  ],
   "icons": [
-    { "src": "./icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
-    { "src": "./icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-    { "src": "./icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    {
+      "src": "./icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
   ]
 }
