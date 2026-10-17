@@ -12,6 +12,8 @@
     <script>
         /* Bloqueo inmediato si hay PIN (evita ver el contenido antes de que cargue la app) */
         try { if (JSON.parse(localStorage.getItem('taskflow_settings_v1') || '{}').pinHash) document.documentElement.classList.add('locked'); } catch (e) {}
+        /* Guarda el aviso de instalación del navegador aunque llegue antes de que cargue la app */
+        window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); window.__deferredInstall = e; });
     </script>
 
     <!-- PWA Manifest Link con ruta relativa para subdirectorios de GitHub Pages -->
@@ -460,10 +462,12 @@
                 <div id="installCard" class="bg-white dark:bg-slate-800 p-5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm space-y-4 no-print">
                     <h3 class="font-semibold text-slate-800 dark:text-slate-100 text-sm flex items-center gap-2"><i class="fa-solid fa-mobile-screen-button text-blue-500"></i> Instalar la app <span id="installState" class="ml-auto"></span></h3>
                     <p id="installHelp" class="text-xs text-slate-500 dark:text-slate-400"></p>
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <button id="installBtn" onclick="installPwaPrompt()" class="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition"><i class="fa-solid fa-download"></i> Instalar aplicación</button>
+                        <button onclick="runInstallDiagnostic()" class="px-4 py-2.5 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition"><i class="fa-solid fa-stethoscope text-blue-500"></i> Diagnosticar instalación</button>
                         <button onclick="checkForUpdate()" class="px-4 py-2.5 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition"><i class="fa-solid fa-rotate text-emerald-500"></i> Buscar actualización</button>
                     </div>
+                    <div id="installDiag" class="hidden space-y-1.5 text-xs bg-slate-50 dark:bg-slate-900 rounded-xl p-3"></div>
                     <p class="text-[11px] text-slate-400">Versión <span id="appVersionText"></span></p>
                 </div>
 
@@ -2647,7 +2651,7 @@
 
 
         // ===================== Instalación y actualización de la PWA =====================
-        const APP_VERSION = '4.0';
+        const APP_VERSION = '4.1';
         let updateRequested = false;
 
         function isStandalone() {
@@ -2695,8 +2699,90 @@
                 renderInstallCard();
                 const card = document.getElementById('installCard');
                 if (card) card.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                showToast('Sigue las indicaciones de instalación manual');
+                runInstallDiagnostic();
             }
+        }
+
+        async function runInstallDiagnostic() {
+            const box = document.getElementById('installDiag');
+            if (!box) return;
+            box.classList.remove('hidden');
+            box.innerHTML = '<p class="text-slate-400">Comprobando...</p>';
+            const rows = [];
+            const ok = t => rows.push({ s: 'ok', t });
+            const bad = t => rows.push({ s: 'bad', t });
+            const warn = t => rows.push({ s: 'warn', t });
+
+            if (location.protocol === 'https:' || location.hostname === 'localhost') ok('Conexión segura (https)');
+            else bad('La página no usa https: el navegador no permite instalar. Abre el enlace que empieza con https://');
+            if (isStandalone()) ok('Ya se está ejecutando como app instalada');
+
+            // Manifest
+            let manifest = null, manifestUrl = null;
+            const link = document.querySelector('link[rel="manifest"]');
+            if (!link) bad('Falta la línea <link rel="manifest"> en index.html');
+            else {
+                manifestUrl = link.href;
+                try {
+                    const r = await fetch(manifestUrl, { cache: 'no-store' });
+                    if (!r.ok) throw new Error('HTTP ' + r.status);
+                    manifest = await r.json();
+                    ok('manifest.json encontrado');
+                } catch (e) {
+                    bad('No se pudo leer manifest.json (' + e.message + '). Súbelo a la misma carpeta que index.html.');
+                }
+            }
+            if (manifest) {
+                if (manifest.name || manifest.short_name) ok('Nombre: ' + (manifest.short_name || manifest.name)); else bad('El manifest no tiene "name".');
+                if (['standalone', 'fullscreen', 'minimal-ui'].includes(manifest.display)) ok('Modo de pantalla: ' + manifest.display); else bad('El manifest debe tener "display": "standalone".');
+                if (manifest.start_url) ok('Página de inicio: ' + manifest.start_url); else bad('Al manifest le falta "start_url".');
+
+                const icons = Array.isArray(manifest.icons) ? manifest.icons : [];
+                if (!icons.length) bad('El manifest no tiene íconos.');
+                let has192 = false, has512 = false;
+                for (const ic of icons) {
+                    const url = new URL(ic.src, manifestUrl);
+                    const label = (ic.src.split('/').pop() || ic.src) + (ic.sizes ? ' (' + ic.sizes + ')' : '');
+                    let good = false, detail = '';
+                    if (url.origin !== location.origin) {
+                        warn('Ícono externo ' + label + ': puede fallar. Usa íconos propios en la carpeta icons/.');
+                        continue;
+                    }
+                    try {
+                        const r = await fetch(url.href, { cache: 'no-store' });
+                        const ct = r.headers.get('content-type') || '';
+                        if (!r.ok) detail = 'HTTP ' + r.status + ' (no está subido)';
+                        else if (!ct.startsWith('image/')) detail = 'no es una imagen (' + ct + ')';
+                        else good = true;
+                    } catch (e) { detail = 'no se pudo descargar'; }
+                    if (good) {
+                        ok('Ícono ' + label);
+                        (ic.sizes || '').split(' ').forEach(sz => { const n = parseInt(sz, 10); if (n >= 192) has192 = true; if (n >= 512) has512 = true; });
+                    } else bad('Ícono ' + label + ': ' + detail + '. Sube la carpeta icons/ completa.');
+                }
+                if (icons.length && (!has192 || !has512)) bad('Hacen falta íconos de 192 y de 512 píxeles que carguen bien.');
+            }
+
+            // Service worker
+            if (!('serviceWorker' in navigator)) bad('Este navegador no admite service workers.');
+            else {
+                let reg = null;
+                try { reg = await navigator.serviceWorker.getRegistration('./'); } catch (e) {}
+                if (!reg) bad('El service worker (sw.js) no está registrado. Verifica que sw.js esté subido junto a index.html.');
+                else {
+                    if (reg.active) ok('Service worker activo'); else warn('El service worker aún se está instalando. Cierra y vuelve a abrir la página.');
+                    if (reg.active && !navigator.serviceWorker.controller) warn('Recarga la página una vez para que el service worker tome el control.');
+                }
+            }
+
+            // Aviso del navegador
+            if (deferredPrompt) ok('El navegador ofrece instalar: usa el botón "Instalar aplicación".');
+            else if (!isStandalone()) warn('El navegador aún no ofreció instalar. Si todo lo anterior está en verde, abre el menú ⋮ del navegador y elige "Instalar aplicación" o "Añadir a pantalla de inicio". Si ya la instalaste antes, aparecerá "Abrir".');
+
+            const icon = { ok: 'fa-circle-check text-emerald-500', bad: 'fa-circle-xmark text-rose-500', warn: 'fa-triangle-exclamation text-amber-500' };
+            const problems = rows.filter(r => r.s === 'bad').length;
+            box.innerHTML = `<p class="font-semibold mb-2 ${problems ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'}">${problems ? `Se encontró ${problems} problema(s) que impiden instalar:` : 'No se encontraron problemas que impidan instalar.'}</p>`
+                + rows.map(r => `<div class="flex gap-2 items-start"><i class="fa-solid ${icon[r.s]} mt-0.5"></i><span>${esc(r.t)}</span></div>`).join('');
         }
 
         async function checkForUpdate() {
@@ -2720,6 +2806,15 @@
                 navigator.serviceWorker.addEventListener('controllerchange', () => {
                     if (updateRequested) { updateRequested = false; showToast('Actualización instalada, recargando...'); setTimeout(() => location.reload(), 800); }
                 });
+            }
+
+            if (window.__deferredInstall && !deferredPrompt) {
+                deferredPrompt = window.__deferredInstall;
+                const banner0 = document.getElementById('pwaBanner');
+                const btnTop0 = document.getElementById('pwaInstallBtnTop');
+                if (banner0) banner0.classList.remove('hidden');
+                if (btnTop0) btnTop0.classList.remove('hidden');
+                renderInstallCard();
             }
 
             window.addEventListener('beforeinstallprompt', (e) => {

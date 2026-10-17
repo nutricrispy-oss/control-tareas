@@ -1,6 +1,6 @@
 // Prefijo propio: esta app solo toca SUS cachés, nunca las de otras apps del mismo sitio
 const CACHE_PREFIX = 'taskflow-pro-';
-const CACHE_NAME = CACHE_PREFIX + 'v4';
+const CACHE_NAME = CACHE_PREFIX + 'v5';
 
 // Archivos propios
 const LOCAL_ASSETS = [
@@ -25,13 +25,12 @@ const CDN_ASSETS = [
   'https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js'
 ];
 
-// Instalación: los archivos propios son obligatorios; los externos se guardan uno a uno
-// (si uno falla, no se cancela toda la instalación)
+// Instalación: cada archivo se guarda por separado (si uno falla, no se cancela la instalación)
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then(async (cache) => {
-      await cache.addAll(LOCAL_ASSETS);
-      await Promise.allSettled(CDN_ASSETS.map((url) => cache.add(url)));
+      // Ningún archivo faltante debe impedir que el service worker se instale
+      await Promise.allSettled([...LOCAL_ASSETS, ...CDN_ASSETS].map((url) => cache.add(url)));
     })
   );
   self.skipWaiting();
